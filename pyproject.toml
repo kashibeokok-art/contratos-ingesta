@@ -1,0 +1,55 @@
+[project]
+name = "contratos-ingesta"
+version = "0.1.0"
+description = "Contratos de suministro del CEN: descarga, procesamiento y archivo de salida."
+readme = "README.md"
+authors = [
+    { name = "kashibeokok-art", email = "kashibeokok@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "httpx>=0.28.1",
+    "openpyxl>=3.1.5",
+    "pandas>=3.0.6",
+    "psycopg[binary]>=3.3.6",
+    "pyarrow>=26.0.0",
+    "pydantic-settings>=2.16.0",
+    "typer>=0.27.3",
+]
+
+[project.scripts]
+contratos = "contratos_ingesta.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.23,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.4.0",
+    "pandas-stubs>=3.0.5.260914",
+    "pytest>=9.1.1",
+    "ruff>=0.17.1",
+    "types-openpyxl>=3.1.5.20260827",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "PD"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["contratos_ingesta"]
+
+[tool.ruff.format]
+exclude = ["*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+files = ["src", "tests"]

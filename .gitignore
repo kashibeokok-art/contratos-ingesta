@@ -1,0 +1,23 @@
+# Configuración local (claves y rutas): nunca a git
+.env
+.env.*
+!.env.example
+
+# Datos (Bronze, Silver, salidas)
+data/
+*.xlsx
+*.parquet
+*.csv
+# ...salvo los archivos de prueba
+!tests/fixtures/**
+
+# Python
+__pycache__/
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Sistema
+desktop.ini
+Thumbs.db

@@ -1,0 +1,566 @@
+# Errores verificados (para que Claude no los repita)
+
+> Cada entrada es un error **que Claude cometió** en este proyecto o en el código que se está
+> portando, con la evidencia que lo desmintió. No son teorías: todos se comprobaron ejecutando.
+> **Regla:** cuando Claude descubra que se equivocó, agrega la entrada aquí antes de seguir.
+
+Formato: qué afirmé → qué pasa de verdad → evidencia → lección.
+
+## Documento compartido
+
+Este archivo se usa en **`cmg-ingesta`** y en **`ppa-pipeline`**. Los dos proyectos comparten
+stack (`uv`, `ruff`, `mypy --strict`, `pytest`, `pydantic-settings`) y modo de trabajo (mentor),
+así que los mismos errores aplican en ambos.
+
+Al escribir una entrada nueva, redactarla de forma **portable**: donde el prefijo de las variables
+de entorno importe, usar `<PREFIJO>_` en vez del valor concreto, que es `CMGI_` en `cmg-ingesta`
+y `PPA_` en `ppa-pipeline`. Si una entrada aplica solo a un proyecto, decirlo explícitamente.
+
+---
+
+## A. Herramientas (mypy, pytest, ruff, PowerShell)
+
+### A1. mypy con `files` NO acepta una carpeta vacía
+- **Afirmé:** "una carpeta vacía sí le sirve a mypy; no encuentra `.py` ahí y sigue".
+- **Realidad:** falla con `There are no .py[i] files in directory 'tests'`.
+- **Evidencia:** `uv run mypy` con `files = ["src", "tests"]` y `tests/` recién creada vacía (2026-10-05).
+- **Lección:** `files` es una lista de rutas **obligatorias**, cada una con al menos un `.py`.
+  Un andamiaje con esta config no puede estar verde hasta que exista el primer test.
+
+### A2. pytest sin tests devuelve exit 5, no 0
+- **Afirmé:** "pytest con 0 tests, exit 0".
+- **Realidad:** exit **5** = `no tests collected`. Es un código propio, distinto de 1 (fallos),
+  para que un CI no pase en verde cuando los tests desaparecieron.
+- **Evidencia:** `uv run pytest -q` → `no tests ran in 0.01s`, exit 5 (2026-10-05).
+- **Lección:** no prometer "exit 0" en un criterio de aceptación sin tests. Y si alguna vez
+  se quiere tolerar, es `--exitfirst`/`-p no:cacheprovider`… no: es `pytest ... || exit 0`
+  explícito, pero mejor es simplemente tener un test.
+
+### A3. `Select-String -SimpleMatch` desactiva la regex
+- **Afirmé (implícitamente):** que `-Pattern "a|b|c" -SimpleMatch` buscaría cualquiera de los tres.
+- **Realidad:** `-SimpleMatch` busca el **literal** `a|b|c`, pipes incluidos. No encontró nada y
+  casi concluí que los bloques del `pyproject.toml` faltaban, cuando estaban todos.
+- **Evidencia:** la búsqueda no devolvió nada; `Read` del archivo mostró los 5 bloques (2026-10-05).
+- **Lección:** para alternativas, **no** usar `-SimpleMatch`. Y cuando una búsqueda devuelve
+  vacío, confirmar leyendo el archivo antes de afirmar que algo no está.
+
+### A4. Criterios de aceptación autocontradictorios
+- **Error:** pedí "`mypy` limpio y `pytest` en verde" para un andamiaje **sin tests**, lo que
+  esta configuración vuelve imposible (ver A1 y A2).
+- **Lección:** antes de escribir criterios de aceptación, verificar que sean alcanzables en el
+  estado en que va a quedar el proyecto al terminar esa tarea.
+
+### A5. Ni `mypy --strict` ni `ruff` detectan una anotación huérfana
+- **Riesgo de afirmar lo contrario:** es natural suponer que `mypy --strict` atrapa un campo
+  declarado fuera de la clase. **No lo hace.**
+- **Caso:** en `config.py`, `cen_api_key: SecretStr | None` escrito a nivel de módulo (sin indentar,
+  fuera de `class Settings`) y sin `= valor`.
+- **Realidad:** una anotación sin asignación **no crea ninguna variable**; solo agrega una entrada a
+  `__annotations__`. Dentro del cuerpo de una clase pydantic eso sí define un campo (pydantic lee
+  `__annotations__`), pero a nivel de módulo no define nada y nadie la lee.
+- **Evidencia (2026-10-05):** `mypy --strict` → `Success: no issues found in 7 source files`;
+  `ruff check` → `All checks passed!`; pero `Settings.model_fields` → `['data_dir', 'log_level']`
+  y `config.cen_api_key` → `AttributeError`.
+- **Lección:** *Defense in Depth* — el linter y el chequeo de tipos no sustituyen al test. Lo único
+  que atrapa esto es una aserción sobre `model_fields` o sobre el comportamiento. Mismo patrón que
+  el `logging.warninr` y la función duplicada de `OLD/` en `ppa-pipeline` §5.2: ninguna herramienta
+  atrapa todo.
+
+### A6. `os.environ` NO revienta al borrar mientras se recorre
+- **Afirmé:** que en `for clave in os.environ: del os.environ[clave]` el `list()` era obligatorio
+  porque "sin la copia reventaría".
+- **Realidad:** no lanza nada. `os.environ` no es un `dict`, es un `os._Environ`, y su `__iter__`
+  ya copia las claves por dentro: `keys = list(self._data)` (con el comentario de CPython
+  *"list() from dict object is an atomic operation"*). Un `dict` normal **sí** lanza
+  `RuntimeError: dictionary changed size during iteration`.
+- **Evidencia (2026-10-05):** el bucle sin `list()` sobre `os.environ` borró las 4 variables sin
+  error; el mismo patrón sobre `{"a":1,"b":2,"c":3}` lanzó `RuntimeError`.
+- **Lección:** `list(os.environ)` es defensivo y legible, pero **no** es obligatorio, y la razón
+  que yo daba era falsa. No justificar una práctica con un mecanismo sin verificarlo: el tipo
+  real de un objeto de la stdlib puede no ser el que uno asume (`os.environ` no es `dict`,
+  `Path` no es `str`, etc.).
+
+---
+
+### A7. `httpx` DESCARTA el query string de la URL si se le pasa `params`
+- **Afirmé:** que una URL con `?user_key={APIKey}` más un `user_key` en `params` enviaría el
+  parámetro **duplicado**.
+- **Realidad:** `httpx` **reemplaza** por completo el query string de la URL con el de `params`.
+  Se envía uno solo, el de `params`. No hay duplicación.
+- **Evidencia (2026-10-05):** `httpx.Request("GET", url_con_query, params=...)` →
+  `url.params.get_list("user_key")` devuelve **una** entrada, la de `params`, y el `{APIKey}`
+  literal de la URL desaparece.
+- **Lección:** la trampa es la inversa de la que yo anuncié: cualquier parámetro escrito en la
+  constante de la URL **se pierde en silencio** al pasar `params`. Los parámetros van en un solo
+  lugar, y conviene que sea `params`. Y antes de afirmar cómo se combinan dos fuentes de datos
+  en una librería, construir la petición y mirarla (sin enviarla).
+
+### A8. Declarar "imposible" un bloqueo de Cloudflare sin probar la capa TLS
+- **Afirmé:** que los `.zip` y las páginas del Coordinador "no se pueden descargar
+  programáticamente, punto", que "no es un header que falte" y que hacía falta resolver el desafío
+  JavaScript (o sea, un navegador). Lo repetí en varios mensajes y lo dejé escrito en `CLAUDE.md`.
+- **Realidad:** el filtro era por **huella TLS** (JA3/JA4), no por JavaScript. `curl_cffi` con
+  `impersonate="chrome"` obtiene **200** en el índice, en la página del día (con los 2 ZIP
+  esperados) y en el ZIP (12,2 MB, `application/zip`, firma `PK\x03\x04`). Sin navegador.
+- **La pista estaba a la vista:** `requests` puro no recibía un 403 sino un **corte del handshake
+  TLS** (`SSLEOFError: UNEXPECTED_EOF_WHILE_READING`). Un corte en la negociación TLS significa que
+  el servidor decide **antes** de ver un solo header. Cambiar el User-Agent nunca podía servir.
+- **Evidencia (2026-10-06):** `scratchpad/probar_cffi.py`.
+- **Lección:** antes de declarar algo imposible, enumerar las capas donde puede estar el filtro
+  (red/proxy → TLS → headers → JavaScript → CAPTCHA) y probar cada una. Probé red y headers, me
+  salté TLS, y concluí "JavaScript" por eliminación incompleta. **Costó varias vueltas al usuario,
+  que tuvo que insistir en que "debe haber formas de hacerlo".** Tenía razón.
+
+### A9. Una regla derivada del día normal da falsa alarma en el día DST
+- **Error:** para detectar archivos con la hora en base 1, usé `hora mínima == 1 y no hay hora 0`.
+  Sirve un día normal (1..24 vs 0..23), pero **el domingo de 23 horas los datos correctos empiezan
+  en la hora 1**, porque la hora 0 no existió. La regla los marcaba como críticos.
+- **Peor:** ese día la convención es **indistinguible**: base 0 con la hora 0 faltante (1..23) y
+  base 1 (1..23) dan el mismo conjunto. No hay regla que lo resuelva; solo se puede no evaluarlo.
+- **Evidencia (2026-10-06):** lo atrapó `test_dia_corto_sin_la_hora_fantasma_tambien_se_informa`
+  antes de entregar. Corregido: la regla ahora es `hora máxima == horas del día`, y no se aplica el
+  día corto.
+- **Lección:** toda regla sobre horas se prueba sobre **los tres tipos de día** (normal, 25 h,
+  23 h) antes de darla por buena. Los casos borde del calendario son justamente donde las reglas
+  "obvias" fallan, y una falsa alarma crítica en el día DST es exactamente lo que hace que un
+  vigilante se ignore.
+
+### A10. Una ruta relativa en la configuración depende de desde dónde se ejecuta
+- **Error:** dejé `data_dir: Path = Path("data")` y `env_file=".env"`, ambos **relativos a la
+  carpeta actual**. Todos los tests pasaban porque siempre corrían desde la carpeta del proyecto
+  (o hacían `chdir` a un temporal).
+- **Evidencia (2026-10-08):** el usuario corrió `uv run cmg` y "no reconoce los datos". Desde
+  `cmg-ingesta\` → 201.810.260 filas; desde `Scripts\` → "La base esta vacia. Esperada en:
+  data\silver\cmg". Desde otra carpeta **ni siquiera se leía el `.env`**.
+- **Corrección:** `RAIZ_PROYECTO = Path(__file__).resolve().parents[2]` (válido porque `uv sync`
+  instala en modo editable); `env_file = RAIZ_PROYECTO / ".env"`; un `field_validator` cuelga de la
+  raíz toda ruta relativa y respeta las absolutas. Verificado desde 3 carpetas distintas.
+- **Efecto colateral que hubo que cubrir:** con el `.env` anclado al proyecto, cambiar de carpeta
+  **ya no aislaba** los tests del `.env` real (que tiene la clave). Se apagó para todos con una
+  fixture `autouse` en `conftest.py`.
+- **Lección:** cualquier ruta que lea un programa de línea de comandos hay que probarla
+  **ejecutando desde otra carpeta**. Un test que siempre corre desde la raíz no puede detectarlo.
+  En `ppa-pipeline` aplica igual a `Settings`.
+
+### A11. Calcular "lo esperado" a partir de lo que ya hay esconde los huecos
+- **Error:** tres lugares medían la completitud contra los propios datos:
+  `vigilar_fuente` revisaba desde el **primer día del manifiesto** (y con el manifiesto vacío no
+  revisaba nada); `desde_sugerido` sugería desde el **día siguiente al último descargado**; y
+  `cmg estado` mostraba **primer y último mes** ("2021-01 a 2026-10 (70 meses)").
+- **Evidencia (2026-10-08):** el usuario bajó solo 2026-10-04..06. Silver quedó con 2021–2024 +
+  esos 3 días. `vigilar_fuente` → **0 hallazgos**; el menú sugería **2026-10-04**; `estado`
+  decía 70 meses teniendo 49. Los 641 días de 2025-01-01 a 2026-10-03 no existían para el programa.
+  El reporte del usuario: "al añadir días recientes deja de saber que hay días que faltan".
+- **Agravante:** los tests que escribí **fijaban el error**: armaban manifiestos con un hueco
+  desde 2025 y esperaban que se ignorara (`test_desde_sugerido_sigue_despues_del_ultimo_dia`,
+  `test_vigilar_fuente_revisa_la_completitud_de_todo_el_manifiesto`).
+- **Corrección:** el rango esperado es un **contrato fijo** (2021-01-01 → hoy − 3 días; la
+  página desde `INICIO_FUENTE`), nunca derivado de los datos. `quality/cobertura.py` lo mide en
+  Silver y clasifica cada día faltante (maestro / sin descargar / sin ingerir). Regresión con el
+  caso real en `test_cobertura.py::test_el_caso_real_del_usuario`.
+- **Lección:** una validación de completitud necesita una expectativa **independiente** del
+  dato que valida. Es el mismo principio de §3 de la guía 03 ("validar contra una expectativa"),
+  que yo mismo había documentado, aplicado al calendario de días en vez de al de cuartos. Y un
+  test que arma el escenario "con hueco" debe esperar que el hueco **se vea**.
+
+### A12. "Idempotente" no es "retomable": el manifiesto se guardaba solo al final
+- **Error:** `sincronizar` escribe cada ZIP a disco al bajarlo, pero guarda el manifiesto **una
+  sola vez, al terminar** (`if nuevos: guardar_manifiesto(...)`). Y no hay reintentos: un error
+  HTTP corta la corrida (`tenacity` está en las dependencias pero no se usa). Lo documenté como
+  idempotente, y lo es, pero solo cuando la corrida **termina**.
+- **Evidencia (2026-10-08, simulación sin red, `scratchpad/prueba_corte.py`):** 3 días, un 503 en
+  el tercer ZIP → los dos primeros quedan en disco, **manifiesto inexistente**; la segunda corrida
+  vuelve a pedir **los tres**. El menú (opción 4) promete "se puede interrumpir con Ctrl+C y
+  retomar después", que con un backfill de ~1.600 ZIP / ~20 GB es falso en la práctica.
+- **Lección:** idempotencia (repetir no cambia el resultado) y reanudabilidad (lo hecho no se
+  pierde si se corta) son propiedades distintas. Un proceso largo tiene que **persistir el avance
+  por unidad de trabajo** (aquí, por ZIP) y probarse **cortándolo a la mitad**, no solo
+  corriéndolo dos veces completo.
+- **Estado: CORREGIDO 2026-10-08.** Cada ZIP se escribe como `.part`, se verifica
+  (`problema_del_zip`: tamaño y `testzip`), se renombra y se anota; el manifiesto se guarda tras
+  cada archivo. `pedir` reintenta 429/5xx/timeout con espera creciente. Regresión:
+  `test_descarga_robusta.py::test_un_corte_a_mitad_no_obliga_a_bajar_de_nuevo`.
+
+### A13. Suponer que una fuente es "la confiable" sin contrastarla
+- **Error:** al ver que las etiquetas de la página tenían solo 7 formas (contra 26 del nombre),
+  decidí que la etiqueta mandaba en tipo **y versión**. Contrastadas las dos fuentes en los 1.765
+  casos reales, chocan 14 veces: en 13 el nombre dice `v2` y la etiqueta lo **omite**; en 1 el
+  tipo choca y la secuencia de publicación le da la razón a la etiqueta.
+- **Corrección:** tipo de la etiqueta, versión la **mayor** de las dos, reemisión del nombre
+  (`cen.clasificar_documento`). Cada choque queda como aviso.
+- **Lección:** "más regular" no es "más correcta". Cuando hay dos fuentes del mismo dato, se mide
+  dónde discrepan **antes** de elegir una, y la regla se escribe con esos casos como test.
+
+### A14. Una cifra escrita de memoria en un informe
+- **Error:** escribí "22 definitivos v2 de agosto 2026 (días 10 al 31)" sin contarlos. Eran 28
+  revisiones en ese sub-sitemap (27 v2 y 1 v3), de 21 días de agosto. También di "34 días con
+  versión equivocada" desde un conteo aproximado; la comparación exacta lector viejo contra nuevo
+  da **32** (5 con preliminar en vez de definitivo).
+- **Lección:** toda cifra de un informe sale de un script cuyo resultado está a la vista, y si
+  esa cifra va a un test, el test la verifica (fue un test el que atrapó el 21).
+
+### A15. Asignar un código de salida sin mirar cuáles usa la librería de debajo
+- **Error:** definí 0 bien / 1 error de uso o del programa / **2 hallazgos**. Pero click (debajo de
+  typer) sale con **2** en todo error de uso que detecta antes de entrar a la función.
+- **Evidencia (2026-10-09, reportado en la revisión de `cli.py` y reproducido):**
+  `cmg descargar-cen` → "Missing option '--desde'" exit=2; `--pausa abc` → exit=2; comando
+  inexistente → exit=2. Una tarea programada mal escrita se leía como "hay hallazgos", sin
+  reporte en `data/alertas/`. Los errores que detectaba el programa (fecha mal escrita) sí daban 1:
+  la misma clase de error salía con dos códigos distintos.
+- **Corrección:** 0 bien · 1 no se pudo cumplir · 2 comando mal escrito (click o el programa,
+  `cli._uso`) · 3 hallazgos. Tests que fijan los cuatro números y los errores de click.
+- **Lección:** un código de salida es un contrato con quien llama, y las librerías ya ocupan
+  algunos. Se prueba **invocando el comando mal escrito**, no solo los caminos de la función.
+
+### A16. Justificar una configuración con un valor por defecto que no se consultó
+- **Afirmé** (docstring de `conexion.abrir`): que sin `temp_directory` DuckDB desborda "al temporal
+  del sistema, que en Windows suele estar en el disco C".
+- **Realidad:** en DuckDB 1.5.6, con base en memoria, el valor por defecto es **`.tmp`**, una ruta
+  **relativa a la carpeta desde donde se ejecuta** el comando (el mismo tipo de defecto que A10).
+- **Evidencia (2026-10-13):** `duckdb.connect().execute("select current_setting('temp_directory')")`
+  → `.tmp`. Encontrado en la revisión guiada de `conexion.py`.
+- **Corrección:** la conclusión (fijar `temp_directory`) seguía siendo correcta; se corrigió la
+  razón en el docstring.
+- **Lección:** antes de escribir "sin esto, la librería hace X", consultar el valor por defecto
+  real en la versión instalada (`current_setting`, `inspect.signature`, `model_config`). Una
+  razón falsa para una práctica correcta hace que alguien la quite cuando la razón deje de aplicar.
+
+### A17. Una protección que cubre solo parte de los caminos, documentada como total
+- **Error (sesión de revisión guiada, 2026-10-13):** se exigió que la carpeta de datos existiera
+  para atrapar un `CMGI_DATA_DIR` mal escrito, pero solo en `conexion.abrir` (DuckDB). Y se
+  documentó que "solo una `CMGI_*` desconocida en el `.env` hace fallar el arranque".
+- **Evidencia (probado con la CLI):** con `CMGI_DATA_DIR=...\dta`, `descargar-cen` creaba `dta/` y
+  descargaba ahí (exit 0) y `vigilar-fuente` también la creaba (exit 3). Y un `.env` con
+  `SQL_SERVIDOR=192.168.0.85` hacía fallar `Settings()` con `extra_forbidden`: rechazaba
+  **cualquier** variable ajena, justo lo que necesitará el `.env` del servidor con la API.
+- **Corrección:** `conexion.exigir_carpeta` en todos los comandos que escriben bajo `data_dir`;
+  `extra="ignore"` + `_sin_cmgi_desconocidas` para detener solo las `CMGI_*` desconocidas.
+- **Lección:** una protección se prueba **por cada camino que lleva al daño** (aquí: todo comando
+  que escribe en disco), no solo por el que motivó el cambio. Y una afirmación sobre qué rechaza
+  una librería se prueba también con el caso que **no** debería rechazar.
+
+### A18. Un catálogo de formatos verificado con archivos de una sola época
+- **Error (sesiones 1–9, detectado el 2026-10-13):** el catálogo de `quality/deriva.py`
+  (archivos del ZIP, encabezados) se armó con 6 ZIP reales **de 2026** y se documentó como "lo
+  conocido". La fuente se usa desde **2024-08**, y nunca se probó con un ZIP de esa época.
+- **Evidencia (los 332 ZIP que bajó Claudio, 2024-08-01..2025-01-10):** con el catálogo viejo,
+  **269** tenían un hallazgo crítico y no habrían entrado a Silver. (1) Los 121 ZIP de operación
+  2024-08/09 traen otro encabezado: `CMgE/CMgP/CMgR[mills/kWh]` en vez de
+  `CMG_EN_LINEA/CMG_REAL_PRE/CMG_REAL_DEF[USD/MWh]`. (2) En 148 ZIP de 2024-09..2025-01 el archivo
+  es `PromediosBarras2025…` **sin** el `_`, y el patrón lo exigía. (3) Hay un `_E` además de
+  `_R`/`_P`, y un `Fpen_Reales_AAMMDD_MOD_def.xlsx`. Se notó al probar los testigos con ZIP reales:
+  los 4 días de prueba quedaban omitidos.
+- **Verificación del mapeo antes de corregir:** `CMgE` = `CMG_EN_LINEA` y `CMgP` = `CMG_REAL_PRE`
+  con diferencia 0 en los 4 días que tienen un ZIP de cada formato (~145.000 filas cada uno);
+  `CMgR` vale 0 en todo ZIP `pre` y es **igual fila a fila** al `PromediosBarras…_R` (real) del
+  mismo ZIP (2024-08-14 y 2024-09-30), cosa que no pasa con `CMgP` ni con `CMgE`. mills/kWh =
+  USD/MWh, sin conversión.
+- **Corrección:** `ENCABEZADO_COMPARATIVO_2024` y `catalogo_comparativo` en `deriva.py`;
+  `pagina_cen.columna_valor` elige la columna leyendo el encabezado de cada CSV; el patrón de
+  promedios acepta `_?` y `[RPE]`. Tras la corrección, 2 críticos en 332, los dos reales de la
+  fuente y sin efecto (un `pre` publicado en la página de otro día; un `_E`, ya aceptado).
+- **Lección:** un catálogo de "lo conocido" se verifica con una **muestra de todo el período**
+  que el programa va a leer (al menos el primer y el último mes), no solo con lo más reciente. Y
+  antes de un backfill, correr el chequeo sobre **todo** lo descargado y contar críticos.
+
+### A19. Repetir A18 al día siguiente: verificar con lo descargado, no con todo el período
+- **Error (2026-10-13):** al corregir A18 dije "tras la corrección, 2 críticos en 332". Esos 332
+  ZIP llegaban solo a 2025-01-10, y la lección de A18 era justamente usar una muestra de **todo**
+  el período. No lo hice.
+- **Evidencia (reporte `deriva_20261013_220833`, con los 1.774 ZIP hasta 2026-10-12):** 318
+  críticos y 2.267 hallazgos. (1) 109 ZIP traen todo dentro de una **carpeta** del ZIP
+  (`Antecedentes_CMG_Real_def/CmgBarras…csv`) y el patrón comparaba la ruta completa.
+  (2) Dos traen `CmgBarrasComparativo_…_15_NUEVO.csv`. (3) **El más grave, sin aviso:** 49
+  revisiones de 2025-02/03 traen dos juegos de columnas (`CMG_REAL_DEF` y `CMG_REAL_DEF v2`, o
+  `_v2`), y el programa leía `CMG_REAL_DEF`, que **repite el v1** (100 % igual al v1 en los 49).
+  Silver habría guardado el dato anterior a la revisión, marcado como v2.
+- **Verificación antes de corregir:** en los 49, la última columna del par coincide con el
+  documento publicado después (100 % en casi todos). `pre-v2_250228` trae el orden al revés
+  (`PRE v2, DEF v2, PRE, DEF`) y ahí lo revisado es la columna **sin** "v2": la regla correcta es
+  **la última del encabezado**, no la etiqueta.
+- **Corrección:** `pagina_cen.columna_valor` toma la última candidata; `deriva._sin_carpeta` y
+  `(_NUEVO)?`; columnas v2, el `;` final y el formato mixto de 2025-02-26 son conocidos.
+  `ingerir_cen.REGLAS` entra en la huella del mes: cambiar una regla reingiere todo una vez.
+  Sobre los 1.774 ZIP: 0 críticos. Pedido del usuario incorporado: cada hallazgo lleva `archivo`
+  y el reporte agrupa el mismo problema con la lista de archivos.
+- **Lección:** "verificado" se dice **sobre qué conjunto**: "0 críticos en los 332 ZIP hasta
+  2025-01-10" no es "el formato está resuelto". Y una columna con un nombre conocido puede traer
+  otro dato: al aparecer columnas nuevas *junto* a la conocida, comparar valores contra el
+  documento anterior y el posterior antes de decidir cuál leer.
+
+### A20. Silver aceptó filas sin clave, y la carga a PostgreSQL se cayó con un TypeError
+- **Error (2026-10-14):** la ingesta escribía en Silver cualquier fila del CSV, aunque viniera
+  sin barra, fecha ni hora, y `publicar-sql` daba por hecho que todas tenían barra.
+- **Evidencia:** `publicar-sql` cayó con `TypeError: '<' not supported between instances of
+  'NoneType' and 'str'` al ordenar las barras de 2025-01. Silver 2025-01 tenía 261.755 filas
+  totalmente vacías: cinco `def` (10, 13, 14, 15 y 16 de enero) traen el CSV rellenado hasta
+  200.000 líneas con `;;;;;;;;;;` (52.351 cada uno). Los datos reales estaban completos
+  (1.538 barras × 96 cuartos, igual que los días vecinos). Es el único mes afectado.
+- **Corrección:** la lectura descarta las líneas sin barra, fecha ni hora (una fila con datos y
+  sin barra NO se descarta: se reporta); el reporte lo avisa como `lineas_vacias` (info, con el
+  ZIP); `publicar-sql` revisa que el mes no tenga filas sin clave antes de tocar la base y, si
+  las hay, se detiene con un mensaje que dice cómo rehacerlo; `ingerir-pagina --mes AAAA-MM`
+  rehace un mes puntual.
+- **Lección:** cada capa valida lo que **recibe**, no solo lo que produce: la clave de una fila
+  (barra, fecha, hora, minuto) nunca puede ser nula al escribir Silver ni al leerlo para publicar.
+
+### A21. Dejar que pandas adivine el orden de una fecha en texto (solo `ppa-pipeline`)
+- **Error (2026-10-15):** en `silver/contratos.py` leí las fechas del Excel de contratos con
+  `pd.to_datetime(texto, errors="coerce")`, suponiendo que todas eran fechas reales.
+- **Realidad:** `Suscripción`, `Inicio` y `Término` llegan como `AAAA-MM-DD HH:MM:SS`, pero
+  `Fecha Término Renovación` llega como **texto** `DD-MM-AAAA` (343 contratos). pandas lo lee
+  mes-primero: `30-09-2026` lo acierta (no hay mes 30), pero `05-03-2027` lo convierte en el
+  **3 de mayo** sin ningún error. Esa fecha decide la vigencia (RN-06) y el "por vencer".
+- **Evidencia:** la primera corrida real (`ppa-contratos procesar`, 2026-10-15) mostró
+  `UserWarning: Parsing dates in %d-%m-%Y format when dayfirst=False`; el conteo de formatos
+  por columna confirmó `99-99-9999` en 343 valores de la renovación.
+- **Efecto medido:** con la corrección, los vigentes pasan de 6.979 a 6.978 y los choques con
+  `Estado Contrato` de 3 a 2: un contrato se daba por vigente por una fecha mal leída.
+- **Corrección:** `contratos.fecha()` prueba formatos explícitos en orden
+  (`FORMATOS_FECHA`) y devuelve None si ninguno calza. Test con `05-03-2027` → 5 de marzo.
+- **Lección:** una advertencia de la librería en la primera corrida real es un hallazgo, no
+  ruido. Y una columna de fecha se perfila (formas distintas de sus valores) antes de
+  convertirla: el formato puede cambiar de una columna a otra del mismo archivo.
+
+### A22. Repetir B4 y A12: una lectura larga de Safira sin reintento ni avance guardado (solo `ppa-pipeline`)
+- **Error (2026-10-15):** `silver/medidas.leer_a_staging` leía los 5 CSV del mes (~11 GB) sin
+  reintentos y **borraba el staging al empezar**. B4 ya decía "asumir que un SMB se cae en
+  lecturas largas" y A12 que "idempotente no es retomable"; `CMG_Build` reintentaba por archivo.
+- **Evidencia:** primera ingesta real de 2026-04: Compraventas (2,3 GB, 360 s) y Norte (1,9 GB,
+  321 s) listos; en `Norte Distribución` a los 2.592.000.000 bytes, `IO Error ... Error de red
+  inesperado`, exit 1. Se perdieron 11 minutos de lectura: la siguiente corrida empezaba de cero.
+- **Corrección:** cada archivo reintenta 4 veces con espera creciente (15 → 120 s); cada parte se
+  escribe a `.tmp`, se renombra y deja una marca con la identidad del archivo (ruta, tamaño,
+  fecha, reglas, tipos); una parte con la misma identidad no se vuelve a leer. Tests que simulan
+  el corte y la segunda corrida.
+- **Lección:** antes de escribir un proceso de red largo, releer B4/A12 y preguntarse "¿qué pasa
+  si se corta en el byte 2.592.000.000?". Los tests con archivos locales chicos nunca se cortan:
+  el corte hay que simularlo.
+
+---
+
+## B. Procesamiento de datos (del código que se está portando)
+
+### B1. El límite de una bisección no es el borde: hay que refinarlo
+- **Error:** en `preparar_medidas.py`, `fin_contenido()` devolvía `lo`, el último bloque de 256 KB
+  **que todavía tenía datos**. El contenido real seguía hasta 256 KB más allá del corte: ~1.300
+  filas por archivo que se habrían perdido en silencio.
+- **Evidencia:** la verificación estricta abortó con "contenido real DESPUÉS del corte (1 muestra)".
+  Tras refinar byte a byte, los 5 archivos verifican limpio (2026-09-22).
+- **Lección:** una bisección con bloques entrega una **cota inferior**, no el borde. Si el borde
+  importa, refinar dentro de la ventana. Y la verificación estricta sirvió: no quitarla.
+
+### B2. Filas cortas pueden estar **corridas**, no truncadas
+- **Error:** supuse que 5 filas con 22/23 campos en vez de 24 les faltaban las columnas finales,
+  e iba a usar `null_padding=true`.
+- **Realidad:** les faltaba una columna **del medio** (`medida_3`, justo la energía). Alineando por
+  la derecha, `C_FIS` caía en `Nombre_Corto` y el RUT en `Razon_Social`. Rellenar al final habría
+  puesto números en la columna equivocada, sin error.
+- **Evidencia:** volcado campo por campo de las 5 filas contra el encabezado (2026-09-22).
+- **Lección:** antes de rellenar, **alinear por la derecha** y verificar dónde está el hueco.
+  `null_padding` solo es seguro si se comprobó que faltan las columnas finales.
+  Corolario: descartar + reportar + **cuadrar el conteo** (`filas_csv - descartadas == filas_parquet`).
+
+### B3. No borrar trabajo caro en la ruta de error
+- **Error:** el `finally` de `preparar()` borraba el staging, así que un fallo en el paso de parquet
+  destruyó 1,2 GB ya descargados por red (3,5 min de transferencia).
+- **Lección:** la limpieza de artefactos intermedios **caros** va en la ruta de éxito, no en
+  `finally`. Con manifiesto (`total`, `fin`, `escritos`) la segunda corrida los reutiliza.
+
+### B4. No leer el recurso de red en paralelo con una copia larga
+- **Error:** mientras corría una copia de varios minutos desde `\\SAFIRA_CL1`, leí el encabezado de
+  otro archivo del mismo share. Las dos operaciones murieron a la vez (`OSError 22`, "error de red
+  inesperado").
+- **Lección:** una sola operación contra el share a la vez. Y asumir que un SMB se cae en lecturas
+  largas: reintentos que **retomen desde el último byte**, no que reinicien.
+
+### B5. Ventanas de 12 meses: poner el límite superior
+- **Error:** `WHERE fecha >= DATE '2025-08-01'` sin cota superior dio **13 meses** y sesgó el perfil
+  estacional (el mes repetido contaba doble).
+- **Lección:** una ventana móvil lleva las dos cotas, y verificar con
+  `count(DISTINCT anio*100+mes) = 12`.
+
+### B6. Unidades: no mezclar bytes con MB
+- **Error:** reporté "159.144.095x más chico" al dividir bytes por MB. El factor real era 152x.
+- **Lección:** convertir **una vez** a la unidad de salida y operar ahí.
+
+### B7. Un nombre de cliente no es su rubro
+- **Error:** `FARELLONES` encabezaba la búsqueda de frigoríficos por estacionalidad, pero son
+  18,9 MW medios en 220 kV: es minería, no andariveles.
+- **Lección:** validar con la **forma** (perfil, factor de carga, nivel de tensión), no con el nombre.
+  Y los artefactos de cobertura parcial (`max/min = inf`, energía solo en un mes) se ven como
+  estacionalidad extrema: filtrar `min(mes) > 0` antes de rankear.
+
+### B8. Portar la normalización del legado borraba la Ñ
+- **Error:** porté `core._normaliza()` tal cual para la búsqueda de barras del menú:
+  `re.sub(r"[^0-9A-Za-z]+", " ", texto.upper())`. La `Ñ` no está en `A-Z`, así que caía en el
+  separador: `PEÑABLANCA____013` quedaba como `PE ABLANCA 013`.
+- **Evidencia (2026-10-07):** al probar el menú contra la base real, buscar "penablanca" no traía
+  `PEÑABLANCA`. Y la base tiene **las dos grafías como barras distintas** (`PENABLANCA____013` y
+  `PEÑABLANCA____013`), así que el usuario veía solo la mitad sin saberlo.
+- **Arreglo:** descomponer con `unicodedata.normalize("NFKD", ...)` y descartar las marcas
+  (`Ñ` = `N` + tilde) antes de limpiar separadores.
+- **Lección:** un patrón `[A-Z]` en español es un bug esperando datos. Al portar, probar con
+  nombres reales que tengan Ñ y tildes, no solo con los de los tests sintéticos.
+
+
+### B9. "Borrar el viejo y después renombrar el nuevo" no es atómico
+- **Error:** en `silver/escribir.py: escribir_particion` (sesión 2) el paso final era
+  `shutil.rmtree(destino)` y luego `tmp.replace(destino)`, y el docstring lo llamaba "atómico".
+  Entre las dos líneas el mes **no existe**; si el renombre falla, queda sin datos.
+- **Evidencia (2026-10-08):** al re-migrar el histórico, `os.replace` falló en `2021-10` con
+  `PermissionError: [WinError 5] Acceso denegado` (antivirus/indexador, el mismo fenómeno que la
+  sesión 5 vio en el manifiesto). Resultado: `anio=2021/mes=10` borrado y `mes=10__tmp` con los
+  datos. No se perdió nada solo porque la temporal estaba completa y la migración es re-ejecutable.
+- **Origen:** el legado hace lo mismo (`CMG_Build/src/ingesta.py:295-298`: `rmtree(pdir)` y luego
+  `os.replace`), y en la sesión 1 lo catalogué en CLAUDE.md §5 como "lo que sí se conserva porque
+  ya está bien". Se portó el defecto junto con el patrón.
+- **Por qué los tests no lo vieron:** `test_un_fallo_deja_intacto_el_mes_anterior` simulaba un
+  fallo **al escribir** la temporal (paso 1), nunca **al renombrar** (paso 3).
+- **Corrección:** intercambio en tres renombres: `destino → destino__old`, `tmp → destino`, y
+  recién al final se borra `__old`. Si el segundo renombre falla, `__old` vuelve a su lugar. Cada
+  renombre reintenta ante `PermissionError`. `limpiar_temporales` restaura un `__old` huérfano si
+  el mes falta (proceso muerto justo entre dos renombres).
+- **Lección:** "atómico" se prueba inyectando el fallo **en cada paso**, no solo en el primero.
+  En Windows un renombre puede fallar por un proceso ajeno, así que el paso que "no puede fallar"
+  es justamente el que hay que simular.
+---
+
+## C. Método de trabajo
+
+### C1. Verificar el estado del repo antes de afirmar qué falta
+- En `ppa-pipeline`, `CLAUDE.md` decía que los esqueletos de H2.3 estaban creados. En disco **no
+  existían** `cli.py`, `domain/periodo.py` ni sus tests, y `typer` no estaba en `pyproject.toml`.
+- **Lección:** la documentación del proyecto describe la intención; el disco describe la realidad.
+  Verificar antes de planificar sobre ella.
+
+### C2. No inventar esquemas de APIs
+- Pendiente activo: el host y los nombres de campo de `costo-marginal-real/v4` **no están
+  confirmados**. `ppa-pipeline` §4.2.1 registra el path y los parámetros, no la respuesta.
+- **Lección:** el mapeo de la respuesta sale de la documentación del portal o de una respuesta
+  real. Si se adivina, la normalización trabaja sobre campos que no existen.
+
+### C3. El umbral equivocado puede ser el mío, no el dato
+- Dos veces una "anomalía" era mi criterio: una desviación de 7,6e-6 era precisión de float32, y
+  un conteo de filas "incompleto" era mi fórmula (2 columnas basura con 27 valores, no un año).
+- **Lección:** antes de declarar un bug en los datos, verificar el criterio a mano con un caso.
+
+### C7. Descartar una hipótesis con un argumento sobre un vecindario mal elegido
+- **Error:** para descartar que la hora 22 de la API fuera un promedio, argumenté que
+  "un promedio no puede exceder a todos sus insumos" y que el valor (214.21126) superaba al máximo
+  de las horas vecinas (208.24630). El razonamiento es válido; **el vecindario estaba mal elegido**:
+  solo miré las horas 21–24, y la hora **20** vale 217.69248, más alta. La hipótesis **no** quedaba
+  descartada.
+- **Cómo se resolvió bien:** búsqueda sistemática de 64 combinaciones (promedios de pares y triples
+  de las horas 18–24, más ponderados), tolerancia 1e-3 → **0 de 16 casos** reproducidos.
+  Recién ahí quedó descartada.
+- **Evidencia (2026-10-05):** `scratchpad/probar_operaciones.py`.
+- **Lección:** un argumento analítico correcto sobre datos incompletos da una conclusión falsa, y
+  suena más convincente que una duda. Cuando la hipótesis es "existe alguna operación que explica
+  esto", la forma honesta de rechazarla es **enumerar y probar**, no argumentar sobre una muestra
+  del vecindario. Y la hipótesis del usuario (que conoce el dominio) merece el test, no la réplica.
+
+### C5. Concluir un patrón mirando 8 filas de 96
+- **Error:** afirmé que "la API descarta la primera hora 23 y etiqueta la hora 24 como 23" después
+  de comparar **solo los últimos 8 registros** de un día de 96. El calce de `hra=23` con `hora 24`
+  era real, pero la **hora 22 tampoco calzaba** (208.03955 vs 210.07436), así que el desajuste
+  empezaba antes y mi explicación era incompleta. Quedó escrita como hecho en `CLAUDE.md` y hubo
+  que marcarla como no concluida.
+- **Lección:** una muestra del borde sirve para **detectar** una anomalía, nunca para
+  **caracterizarla**. Para explicar el patrón hay que traer el conjunto completo y comparar
+  intervalo por intervalo. Y mientras no esté, escribirlo como hipótesis marcada, no como hallazgo.
+
+### C6. Decir "no se puede calcular" sin intentar calcularlo
+- **Error:** al ver que los días con `hora=24` eran unos viernes y otros sábados, concluí que
+  "no siguen un patrón confiable, hay que detectar el día en vez de predecirlo".
+- **Realidad:** el usuario aportó la regla de negocio (primer sábado de abril) y
+  `zoneinfo("America/Santiago")` la confirma **6 de 6 años**. El cálculo es perfectamente
+  confiable; lo que estaba inconsistente eran las **etiquetas de fecha de los datos**
+  (3 de 6 años corridos un día).
+- **Lección:** distinguir "la regla no existe" de "los datos no la cumplen". Si los datos
+  contradicen una regla, la hipótesis por defecto es que **los datos tienen un defecto**, no que
+  la regla no sea computable. Y el diseño correcto suele ser **calcular + validar**, no reemplazar
+  el cálculo por una detección heurística.
+
+### C8. Escribir el test con la semántica supuesta, no con la documentada
+- **Error (2026-10-07), dos veces en la misma tarea:**
+  1. En un test del menú usé `"2024-06"` creyendo que era "solo junio". `domain/periodo.py` dice
+     en su docstring que es **"desde 2024-06 hasta el último disponible"**, y lo había leído
+     minutos antes.
+  2. Sembré dos barras en el mismo mes con dos llamadas a `sembrar`, sin recordar que escribir un
+     mes **reemplaza la partición entera** (ADR-H06): quedaba solo la segunda barra, y el riesgo
+     nodal no tenía intervalos comunes.
+- **Evidencia:** los dos tests fallaron al primer intento; el código estaba bien.
+- **Lección:** antes de escribir la aserción, releer el contrato de la función que se usa como
+  dato de entrada. Un test que falla por un supuesto del test cuesta una vuelta; uno que **pasa**
+  por un supuesto equivocado no se detecta nunca. Para el segundo caso, `sembrar` ahora acepta
+  `otras={...}` para varias barras en el mismo mes.
+
+### C4. Explicaciones demasiado densas y preguntas que no se entienden
+- **Error:** en una misma respuesta mezclé el diagnóstico, la corrección, un concepto nuevo, una
+  contradicción propia y una "pregunta de verificación" formulada como acertijo. El usuario
+  respondió dos veces seguidas **"no entiendo"**: primero *"¿config ahora está bien?"* y después
+  *"no entiendo qué esperas que haga con `os.environ`"*. Las dos veces la información estaba en mi
+  mensaje, pero enterrada.
+- **Evidencia (2026-10-05):** dos mensajes consecutivos del usuario pidiendo aclaración sobre
+  respuestas que yo consideraba completas.
+- **Lección, en modo mentor:**
+  - Responder **primero** la pregunta literal que se hizo ("¿está bien?" → sí o no, y qué falta),
+    y solo después agregar contexto.
+  - Un concepto nuevo por respuesta. El resto es ruido que esconde la tarea.
+  - Al proponer un cambio: mostrar el **antes y el después**, y el motivo concreto de por qué.
+    No basta nombrar un mecanismo.
+  - Las preguntas de verificación (§2.2) tienen que ser **respondibles**, no adivinanzas. Si la
+    respuesta exige saber lo que todavía no se enseñó, no es una pregunta: es un enigma.
+  - Separar lo urgente de lo opcional. Un valor sensible en un archivo versionado y un detalle de
+    mantenibilidad no pueden ir con el mismo peso en la misma lista.
+
+---
+
+## D. Prácticas verificadas (no son errores, pero evitan uno)
+
+### D1. La fixture de aislamiento debe barrer el prefijo, no listar variables
+- **Aplica a los dos proyectos** (`CMGI_` en `cmg-ingesta`, `PPA_` en `ppa-pipeline`).
+- **Problema:** una fixture que borra las variables una por una queda desincronizada en cuanto se
+  agrega un campo a `Settings`. Si en la máquina existe la variable que falta en la lista, el test
+  deja de estar aislado **en silencio**: `test_valores_por_defecto` empieza a leer el valor real
+  en vez del default, y pasa o falla según el computador.
+- **Práctica:**
+
+  ```python
+  import os
+
+  @pytest.fixture(autouse=True)
+  def sin_archivo_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+      monkeypatch.chdir(tmp_path)                 # sin .env a la vista
+      for clave in list(os.environ):
+          if clave.startswith("<PREFIJO>_"):
+              monkeypatch.delenv(clave, raising=False)
+  ```
+
+- **Por qué `monkeypatch.delenv` y no `del os.environ[...]`:** monkeypatch **restaura** la variable
+  al terminar el test. Un `del` directo modifica el entorno real del proceso y contamina los tests
+  siguientes.
+- **Por qué `monkeypatch.chdir(tmp_path)`:** `env_file=".env"` es una ruta **relativa**, así que lo
+  que aísla del `.env` real es el cambio de directorio, no el `delenv`.
+- **Ojo:** el `list()` es por legibilidad, **no** es obligatorio (ver A6).
+
+### D2. `str(obj)`, no `print(obj)`, para testear que un secreto no se filtra
+- `print()` devuelve `None`: no hay nada sobre lo que hacer la aserción. `str(obj)` entrega el
+  mismo texto que `print` muestra, porque es lo que usa por detrás.
+- El test completo verifica **las dos mitades**, o puede pasar por la razón equivocada:
+
+  ```python
+  assert "clave-falsa" not in str(config)                        # no se filtra
+  assert config.cen_api_key.get_secret_value() == "clave-falsa"  # pero si se guardo
+  ```
+
+  Sin la segunda línea, el test también pasaría si el campo no guardara nada.
+
+### D3. `.env.example` se versiona: documenta variables, nunca valores
+- Es el único archivo de la familia `.env` que entra a git (`!.env.example` en `.gitignore`).
+  Todo lo que se escriba ahí queda público.
+- Las claves van **vacías** (`<PREFIJO>_CEN_API_KEY=`), lo que además ejercita
+  `env_ignore_empty=True`: vacío cuenta como "no configurado".
+- Un placeholder inventado tampoco sirve: quien lee el repo no puede distinguirlo de una
+  credencial real.
