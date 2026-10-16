@@ -156,3 +156,33 @@ def test_comando_mal_escrito_sale_con_2_sin_alerta(
 ) -> None:
     assert _correr_main(monkeypatch, "procesar", "--archivoo", "x") == 2
     assert not (datos / "alertas").exists()
+
+
+def test_esquema_antiguo_dice_que_hay_que_correr_el_sql(
+    datos: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Caso real (2026-10-16): publicar-sql contra un esquema sin contrato_nuevo."""
+    import psycopg
+
+    (datos / "silver").mkdir()
+    (datos / "silver" / "contratos.parquet").write_bytes(b"x")
+    monkeypatch.setenv("CONT_PG_CONEXION", "host=x dbname=cmg_cen user=contratos_carga")
+    monkeypatch.setenv("CONT_PG_CLAVE", "x")
+
+    class ConexionFalsa:
+        def __enter__(self) -> "ConexionFalsa":
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            return None
+
+    def publicar_falso(*_a: object, **_k: object) -> None:
+        raise psycopg.errors.UndefinedTable('relation "contratos.contrato_nuevo" does not exist')
+
+    monkeypatch.setattr("contratos_ingesta.cli.psycopg.connect", lambda *a, **k: ConexionFalsa())
+    monkeypatch.setattr("contratos_ingesta.cli.publicar.publicar", publicar_falso)
+
+    resultado = runner.invoke(cli.app, ["publicar-sql"])
+
+    assert resultado.exit_code == 1
+    assert "volver a correr sql/esquema_contratos.sql" in resultado.output

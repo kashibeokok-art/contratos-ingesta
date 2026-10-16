@@ -130,6 +130,13 @@ def publicar_sql(
             res = publicar.publicar(con, destino, forzar)
     except publicar.DatosInvalidos as e:
         _salir(ERROR, f"No se subió nada (Silver no pasó la validación): {e}")
+    except (psycopg.errors.UndefinedTable, psycopg.errors.UndefinedColumn) as e:
+        _salir(
+            ERROR,
+            f"No se pudo publicar: {e}. El esquema de la base es de una versión anterior: "
+            "un administrador debe volver a correr sql/esquema_contratos.sql en cmg_cen "
+            "(se puede repetir sin perder datos). No se cambió nada en la base.",
+        )
     except (psycopg.Error, ValueError, OSError) as e:
         _salir(ERROR, f"No se pudo publicar: {e}")
     if res["subido"]:
