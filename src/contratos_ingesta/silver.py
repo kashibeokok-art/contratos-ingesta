@@ -261,18 +261,65 @@ def escribir(
     origen: str,
     conteo: Conteo,
 ) -> None:
-    """Escribe las dos tablas y el control. Cada archivo: .tmp y reemplazo (atómico).
+    """Escribe las dos tablas y el control como UN conjunto: o queda la versión nueva completa,
+    o la anterior completa. Nunca una mezcla (mejora 8.10, mismo patrón que B9).
 
-    Primero se escriben las tablas a .tmp, luego se reemplazan, y al final el control: si se
-    corta antes del control, la próxima corrida recalcula lo mismo (las fechas de ingreso de
-    los contratos nuevos vuelven a ser ese mismo día).
+    1. todo a `.tmp`                    (si falla: se borran los .tmp, lo anterior intacto)
+    2. lo anterior a `.old`
+    3. cada `.tmp` a su nombre final     (si falla: se quitan los nuevos y vuelven los `.old`)
+    4. recién ahora se borran los `.old`
+
+    Antes una tabla podía quedar nueva y la otra vieja si el antivirus bloqueaba un renombre.
     """
-    destinos = {"contratos.parquet": contratos, "contrato_barra.parquet": puntos_}
-    for nombre, tabla in destinos.items():
-        tabla.to_parquet(silver / (nombre + ".tmp"), index=False, compression="zstd")
-    for nombre in destinos:
-        (silver / (nombre + ".tmp")).replace(silver / nombre)
+    recuperar(silver)
     control = {"origen": origen, "conteo": conteo, "fecha_ingreso": fecha_ingreso}
-    tmp = silver / (CONTROL + ".tmp")
-    tmp.write_text(json.dumps(control, ensure_ascii=False, indent=1), encoding="utf-8")
-    tmp.replace(silver / CONTROL)
+    tmps = {nombre: silver / (nombre + ".tmp") for nombre in ARCHIVOS}
+    try:
+        contratos.to_parquet(tmps["contratos.parquet"], index=False, compression="zstd")
+        puntos_.to_parquet(tmps["contrato_barra.parquet"], index=False, compression="zstd")
+        tmps[CONTROL].write_text(json.dumps(control, ensure_ascii=False, indent=1), "utf-8")
+    except BaseException:
+        for tmp in tmps.values():
+            tmp.unlink(missing_ok=True)
+        raise
+
+    apartados: list[str] = []
+    puestos: list[str] = []
+    try:
+        for nombre in ARCHIVOS:
+            if (silver / nombre).exists():
+                (silver / nombre).replace(silver / (nombre + ".old"))
+                apartados.append(nombre)
+        for nombre in ARCHIVOS:
+            tmps[nombre].replace(silver / nombre)
+            puestos.append(nombre)
+    except BaseException:
+        for nombre in puestos:
+            (silver / nombre).unlink(missing_ok=True)
+        for nombre in apartados:
+            (silver / (nombre + ".old")).replace(silver / nombre)
+        for tmp in tmps.values():
+            tmp.unlink(missing_ok=True)
+        raise
+    for nombre in apartados:
+        (silver / (nombre + ".old")).unlink(missing_ok=True)
+
+
+#: Los tres archivos de Silver, que se escriben siempre juntos.
+ARCHIVOS = ("contratos.parquet", "contrato_barra.parquet", CONTROL)
+
+
+def recuperar(silver: Path) -> None:
+    """Arregla lo que dejó una corrida que murió a mitad de `escribir` (sin poder deshacer).
+
+    - un `.old` cuyo archivo falta -> el proceso murió entre apartar y poner: vuelve a su lugar;
+    - si quedó un conjunto mezclado (algún final faltante), se restauran TODOS los `.old`;
+    - los `.tmp` sueltos se borran.
+    """
+    viejos = [n for n in ARCHIVOS if (silver / (n + ".old")).exists()]
+    if viejos and any(not (silver / n).exists() for n in ARCHIVOS):
+        for nombre in viejos:
+            (silver / (nombre + ".old")).replace(silver / nombre)
+    for nombre in ARCHIVOS:
+        (silver / (nombre + ".old")).unlink(missing_ok=True)
+        (silver / (nombre + ".tmp")).unlink(missing_ok=True)

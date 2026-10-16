@@ -127,8 +127,12 @@ def descargar(base: Path, cliente: httpx.Client | None = None) -> Resultado:
 
     destino = base / f"Contratos_publica_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
     parcial = destino.with_name(destino.name + ".part")
-    parcial.write_bytes(contenido)
-    parcial.replace(destino)  # el archivo aparece completo o no aparece
+    try:
+        parcial.write_bytes(contenido)
+        parcial.replace(destino)  # el archivo aparece completo o no aparece
+    except BaseException:
+        parcial.unlink(missing_ok=True)
+        raise
     entradas.append(
         {
             "archivo": destino.name,

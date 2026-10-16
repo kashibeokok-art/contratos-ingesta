@@ -194,3 +194,63 @@ def test_reconstruir_fecha_ingreso_toma_el_excel_mas_antiguo(tmp_path: Path) -> 
     )
 
     assert fechas == {"1": "2026-10-01", "2": "2026-10-01", "3": "2026-10-10"}
+
+
+def _escribir_version(destino: Path, excel: Path, ids: list[str]) -> None:
+    ruta = _excel(
+        excel, [_fila(**{"Id Contrato": i, "Listado de puntos de Retiro": "A 13"}) for i in ids]
+    )
+    contratos, puntos, conteo = silver.transformar(silver.leer_excel(ruta), HOY, HOY)
+    contratos, fechas = silver.marcar_fecha_ingreso(contratos, {}, HOY)
+    silver.escribir(destino, contratos, puntos, fechas, ruta.name, conteo)
+
+
+def _ids_en_silver(destino: Path) -> tuple[list[str], list[str], list[str]]:
+    contratos = pd.read_parquet(destino / "contratos.parquet")
+    puntos = pd.read_parquet(destino / "contrato_barra.parquet")
+    control = silver.leer_control(destino) or {}
+    return list(contratos["id_contrato"]), sorted(set(puntos["id_contrato"])), sorted(control)
+
+
+@pytest.mark.parametrize(
+    "falla_en", ["contratos.parquet", "contrato_barra.parquet", "_control.json"]
+)
+def test_un_corte_al_renombrar_deja_silver_completo_y_coherente(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, falla_en: str
+) -> None:
+    """Mejora 8.10 (B9): el fallo se inyecta en CADA renombre, no solo en el primero.
+    Después del fallo, Silver tiene que seguir siendo la versión anterior COMPLETA."""
+    destino = tmp_path / "silver"
+    destino.mkdir()
+    _escribir_version(destino, tmp_path / "v1.xlsx", ["1", "2"])
+    original = Path.replace
+
+    def replace_que_falla(self: Path, target: Path | str) -> Path:
+        if Path(target).name == falla_en and self.name.endswith(".tmp"):
+            raise PermissionError("bloqueado por el antivirus")
+        return original(self, target)
+
+    monkeypatch.setattr(Path, "replace", replace_que_falla)
+    with pytest.raises(PermissionError):
+        _escribir_version(destino, tmp_path / "v2.xlsx", ["9"])
+    monkeypatch.undo()
+
+    assert _ids_en_silver(destino) == (["1", "2"], ["1", "2"], ["1", "2"])
+    assert not list(destino.glob("*.tmp")) and not list(destino.glob("*.old"))
+
+
+def test_proceso_muerto_entre_renombres_se_arregla_en_la_siguiente_corrida(
+    tmp_path: Path,
+) -> None:
+    """El equipo se apagó después de apartar lo viejo y poner solo una tabla nueva."""
+    destino = tmp_path / "silver"
+    destino.mkdir()
+    _escribir_version(destino, tmp_path / "v1.xlsx", ["1", "2"])
+    for nombre in silver.ARCHIVOS:  # estado a mitad del intercambio
+        (destino / nombre).replace(destino / (nombre + ".old"))
+    (destino / "contratos.parquet").write_bytes(b"version nueva a medias")
+
+    silver.recuperar(destino)
+
+    assert _ids_en_silver(destino) == (["1", "2"], ["1", "2"], ["1", "2"])
+    assert not list(destino.glob("*.old"))

@@ -144,7 +144,10 @@ limpias.
   estado distinto).
 - `marcar_fecha_ingreso()`: `fecha_ingreso` = la fecha más antigua conocida para ese ID
   (guardada en `_control.json`), o la de esta carga si el contrato es nuevo.
-- `escribir()`: los dos Parquet a `.tmp`, renombre, y al final el control.
+- `escribir()`: los dos Parquet y el control como **un conjunto**: todo a `.tmp`, lo anterior a
+  `.old`, lo nuevo a su lugar; si un renombre falla, vuelve lo anterior completo. `recuperar()`
+  arregla lo que deje un proceso muerto a mitad (mejora 8.10; el defecto se reprodujo con un
+  test antes de arreglarlo).
 
 Primera corrida real (2026-10-15): 11.237 contratos (6.978 vigentes), 14.328 puntos, 1.549 sin
 energía, 58 años aislados excluidos, 2 con estado distinto.
@@ -229,7 +232,7 @@ Una fila por carga: `fecha_datos`, `archivo_origen`, `sha256_silver`, filas y `c
 | Garantía | Cómo | Probado con |
 |---|---|---|
 | Bronze no guarda copias idénticas | sha256 contra el último | test + API real |
-| Ningún archivo queda a medias | `.part` / `.tmp` + renombre | por construcción; **no hay test que corte el proceso a la mitad** (mejora 8.10) |
+| Ningún archivo queda a medias; Silver nunca queda mezclado (una tabla nueva y otra vieja) | `.part` en Bronze; en Silver los 3 archivos como un conjunto: `.tmp` → apartar `.old` → poner → si falla, devolver `.old` | tests que inyectan el fallo en CADA renombre y uno que simula el proceso muerto a mitad (mejora 8.10) |
 | La base nunca queda a medias | una transacción; ROLLBACK si falla | test que inyecta un fallo a mitad del COPY |
 | Silver malo no llega a la base | validación previa | tests (IDs repetidos, sin ID, huérfanos) |
 | La lectura no puede escribir; la carga no toca `cmg` | permisos SQL | pruebas en copia local |
@@ -335,9 +338,9 @@ acceso a la carpeta del proyecto. (Además, la clave de `postgres` apareció en 
 | 8.7 | Contrato de datos del Excel: lista de columnas esperadas y aviso si aparecen columnas nuevas o cambian de forma (como `quality/deriva.py` de `cmg-ingesta`) | 7.6, 7.8 | medio |
 | 8.8 | GitHub Actions con `ruff`, `mypy` y `pytest` en cada push | 7.9 | bajo |
 | 8.9 | La API de descarga sobre `cmg_lectura` (ADR-C04) | objetivo pendiente | medio |
-| 8.10 | Tests que simulen un corte entre escribir `.tmp` y renombrar (en Bronze y Silver), como `cmg-ingesta` B9 | garantía de la sección 6 | bajo |
+| 8.10 ✅ | Tests que simulen un corte entre escribir `.tmp` y renombrar (en Bronze y Silver), como `cmg-ingesta` B9 | garantía de la sección 6 | bajo |
 
-**Orden sugerido:** ~~8.1~~, ~~8.2~~ (hechos) → 8.5 (que la operación diaria
+**Orden sugerido:** ~~8.1~~, ~~8.2~~, ~~8.10~~ (hechos) → 8.5 (que la operación diaria
 avise) → 8.3 → el resto.
 
 ---

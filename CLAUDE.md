@@ -130,3 +130,4 @@ separadas para no repetir la energía del contrato en cada barra.
 - `docs/funcionamiento.md`: funcionamiento detallado, diccionario de datos, garantías, 9 puntos débiles y 10 mejoras priorizadas (la más urgente: la vigencia envejece si el Excel no cambia, §7.1). Error A23 registrado (tiempo atribuido sin medir).
 - Mejora 8.1 aplicada: `fecha_calculo` + vista `contratos.contrato_hoy` (día de Chile). El usuario debe volver a correr `sql/esquema_contratos.sql` en el servidor (agrega la columna y la vista).
 - Mejora 8.2: si `_control.json` falta o está dañado, `procesar` reconstruye `fecha_ingreso` desde todos los Excel de Bronze (2,1 s por Excel).
+- Mejora 8.10: el test que inyecta un fallo en cada renombre REPRODUJO un defecto real (Silver podía quedar con una tabla nueva y otra vieja). Corregido: Silver se escribe como conjunto con `.old` y vuelta atrás; Bronze borra el `.part` si falla.

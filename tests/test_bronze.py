@@ -82,3 +82,24 @@ def test_enlace_acepta_la_forma_actual_y_rechaza_la_del_legado() -> None:
     )
     with pytest.raises(bronze.ErrorDescarga):
         bronze.enlace({"data": "https://s3/x.xlsx"})  # lo que esperaba OLD/funciones.py:82
+
+
+def test_un_corte_al_renombrar_no_deja_un_excel_ni_lo_anota(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Mejora 8.10: si falla el renombre del .part, no hay Excel con nombre final ni entrada
+    en el manifiesto, y no queda el .part."""
+    original = Path.replace
+
+    def replace_que_falla(self: Path, target: Path | str) -> Path:
+        if self.name.endswith(".part"):
+            raise PermissionError("bloqueado por el antivirus")
+        return original(self, target)
+
+    monkeypatch.setattr(Path, "replace", replace_que_falla)
+    with pytest.raises(PermissionError):
+        bronze.descargar(tmp_path, servidor())
+    monkeypatch.undo()
+
+    assert list(tmp_path.iterdir()) == []
+    assert bronze.descargar(tmp_path, servidor())["nuevo"]  # la siguiente corrida funciona
