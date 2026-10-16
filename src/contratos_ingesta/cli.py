@@ -19,7 +19,7 @@ import psycopg
 import typer
 from pydantic import ValidationError
 
-from contratos_ingesta import bronze, deriva, publicar, rutas, silver
+from contratos_ingesta import bitacora, bronze, deriva, publicar, rutas, silver
 from contratos_ingesta.config import Settings
 
 OK, ERROR, USO, REVISAR = 0, 1, 2, 3
@@ -29,7 +29,7 @@ app = typer.Typer(help="Contratos de suministro del CEN: Bronze -> Silver.", no_
 
 def _salir(codigo: int, mensaje: str | None = None) -> NoReturn:
     if mensaje:
-        typer.echo(mensaje, err=codigo not in (OK, REVISAR))
+        bitacora.decir(mensaje, error=codigo not in (OK, REVISAR))
     raise typer.Exit(codigo)
 
 
@@ -76,7 +76,7 @@ def procesar(
             _salir(ERROR, "Bronze está vacío: corre primero `contratos descargar`.")
         destino = rutas.silver(cfg)
         dia = fecha_del_archivo(ruta)
-        typer.echo(f"Procesando {ruta.name} (datos del {dia})...")
+        bitacora.decir(f"Procesando {ruta.name} (datos del {dia})...")
         tabla = silver.leer_excel(ruta)
         hallazgos = deriva.revisar(tabla)  # mejora 8.7: ¿cambió la forma del Excel?
         contratos, puntos, conteo = silver.transformar(tabla, dia, date.today())
@@ -84,7 +84,7 @@ def procesar(
         if conocidas is None:  # mejora 8.2: el control falta o está dañado
             excels = [(fecha_del_archivo(p), p) for p in bronze.todos(rutas.bronze(cfg))]
             if len(excels) > 1:
-                typer.echo(
+                bitacora.decir(
                     f"  aviso: no hay control de fechas de ingreso en Silver; se reconstruye "
                     f"desde {len(excels)} Excel de Bronze."
                 )
@@ -93,7 +93,7 @@ def procesar(
         silver.escribir(destino, contratos, puntos, fechas, ruta.name, conteo)
     except (silver.FormatoDesconocido, ValueError, OSError) as e:
         _salir(ERROR, f"No se pudo procesar: {e}")
-    typer.echo(
+    bitacora.decir(
         f"Silver: {conteo['contratos']:,} contratos ({conteo['vigentes']:,} vigentes), "
         f"{conteo['puntos']:,} puntos."
     )
@@ -105,9 +105,9 @@ def procesar(
     }
     hay = {k: v for k, v in revisar.items() if conteo[k]}  # type: ignore[literal-required]
     for clave, texto in hay.items():
-        typer.echo(f"  revisar: {conteo[clave]:,} {texto}")  # type: ignore[literal-required]
+        bitacora.decir(f"  revisar: {conteo[clave]:,} {texto}")  # type: ignore[literal-required]
     for h in hallazgos:
-        typer.echo(f"  {h['severidad']} (el Excel cambió de forma): {h['detalle']}")
+        bitacora.decir(f"  {h['severidad']} (el Excel cambió de forma): {h['detalle']}")
     avisos = any(h["severidad"] == "aviso" for h in hallazgos)
     _salir(REVISAR if conteo["ids_repetidos"] or conteo["sin_id"] or avisos else OK)
 
@@ -168,15 +168,15 @@ def estado() -> None:
         destino = rutas.silver(cfg)
     except ValueError as e:
         _salir(ERROR, str(e))
-    typer.echo(f"Bronze: {len(entradas)} Excel distinto(s).")
+    bitacora.decir(f"Bronze: {len(entradas)} Excel distinto(s).")
     for entrada in entradas[-3:]:
-        typer.echo(f"  {entrada['archivo']}  {entrada['bytes'] / 1e6:,.1f} MB")
+        bitacora.decir(f"  {entrada['archivo']}  {entrada['bytes'] / 1e6:,.1f} MB")
     if not (destino / "contratos.parquet").is_file():
         _salir(REVISAR, "Silver: vacío. Corre `contratos procesar`.")
     tabla = pd.read_parquet(destino / "contratos.parquet")
     vigentes = tabla[tabla["vigente"]]
     por_vencer = vigentes[vigentes["dias_para_vencer"] <= 180]
-    typer.echo(
+    bitacora.decir(
         f"Silver: {len(tabla):,} contratos, {len(vigentes):,} vigentes "
         f"(Excel del {tabla['fecha_datos'].iloc[0]}, "
         f"vigencia al {tabla['fecha_calculo'].iloc[0]}); "
@@ -186,4 +186,23 @@ def estado() -> None:
 
 
 def main() -> None:
-    app()
+    """Punto de entrada de `contratos`: corre el comando, anota la bitácora y, si terminó con
+    1 o 3, deja el archivo de alerta (mejora 8.5)."""
+    import sys
+
+    from contratos_ingesta.config import RAIZ_PROYECTO
+
+    try:
+        data_dir = Settings().data_dir
+    except (ValidationError, ValueError):
+        data_dir = RAIZ_PROYECTO / "data"  # con el .env roto, igual se intenta anotar
+    bitacora.iniciar(data_dir)
+    comando = "contratos " + " ".join(sys.argv[1:])
+    try:
+        app()  # typer siempre termina con SystemExit, con el código del comando
+        codigo = OK
+    except SystemExit as fin:
+        codigo = fin.code if isinstance(fin.code, int) else (OK if fin.code is None else ERROR)
+    if (ruta := bitacora.alertar(comando, codigo)) is not None:
+        typer.echo(f"(alerta: {ruta})", err=True)
+    sys.exit(codigo)

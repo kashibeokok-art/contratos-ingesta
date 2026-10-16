@@ -117,3 +117,42 @@ def test_sin_control_la_fecha_de_ingreso_se_reconstruye_desde_bronze(
     tabla = pd.read_parquet(datos / "silver" / "contratos.parquet").set_index("id_contrato")
     assert tabla.loc["1", "fecha_ingreso"] == date(2026, 10, 1)
     assert tabla.loc["2", "fecha_ingreso"] == date(2026, 10, 10)
+
+
+def _correr_main(monkeypatch: pytest.MonkeyPatch, *argumentos: str) -> int:
+    """Corre el punto de entrada real (`contratos ...`), como lo haría una tarea programada."""
+    monkeypatch.setattr("sys.argv", ["contratos", *argumentos])
+    with pytest.raises(SystemExit) as fin:
+        cli.main()
+    return int(fin.value.code or 0)
+
+
+def test_una_corrida_fallida_deja_log_y_alerta(
+    datos: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Mejora 8.5: Bronze vacío -> código 1, log del día y archivo de alerta con qué hacer."""
+    assert _correr_main(monkeypatch, "procesar") == 1
+
+    log = next((datos / "logs").glob("contratos_*.log")).read_text(encoding="utf-8")
+    assert "Bronze está vacío" in log
+    alerta = next((datos / "alertas").glob("ALERTA_*.txt")).read_text(encoding="utf-8")
+    assert "Comando:  contratos procesar" in alerta
+    assert "Código:   1 (no se pudo cumplir)" in alerta and "Qué hacer:" in alerta
+    assert "Bronze está vacío" in alerta
+
+
+def test_una_corrida_bien_no_deja_alerta(datos: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert _correr_main(monkeypatch, "estado") == 3  # Silver vacío: algo que revisar
+    assert len(list((datos / "alertas").glob("ALERTA_*.txt"))) == 1
+    (next((datos / "alertas").glob("ALERTA_*.txt"))).unlink()
+
+    _correr_main(monkeypatch, "--help")
+
+    assert not list((datos / "alertas").glob("ALERTA_*.txt"))
+
+
+def test_comando_mal_escrito_sale_con_2_sin_alerta(
+    datos: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert _correr_main(monkeypatch, "procesar", "--archivoo", "x") == 2
+    assert not (datos / "alertas").exists()

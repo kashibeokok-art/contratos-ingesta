@@ -22,4 +22,8 @@ $LASTEXITCODE                   # el código con que terminó el último comando
 **La fecha de los datos** sale del nombre que puso Bronze (`Contratos_publica_AAAAMMDD_...`):
 reprocesar un Excel viejo calcula la vigencia contra SU fecha, no contra hoy.
 
+**Log y alertas (mejora 8.5):** todo lo que muestra el comando queda en
+`data\logs\contratos_AAAAMMDD.log`. Si termina con 1 o 3, además deja
+`datalertas\ALERTA_AAAAMMDD_HHMMSS.txt` con el comando, el código, qué hacer y la salida.
+
 **Frase:** un comando por acción y un código de salida que una tarea programada puede leer.

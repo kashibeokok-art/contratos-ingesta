@@ -60,6 +60,7 @@ de esa vez no se midió (error A23).
 | `publicar.py` | 142 | Silver → PostgreSQL en una transacción |
 | `cli.py` | — | Comandos y códigos de salida |
 | `deriva.py` | — | ¿El Excel cambió de forma? (mejora 8.7) |
+| `bitacora.py` | — | Log diario y archivo de alerta (mejora 8.5) |
 | `sql/esquema_contratos.sql` | 118 | Esquema, tablas y permisos en `cmg_cen` (lo corre el administrador) |
 
 Dependencias: `pydantic-settings` (configuración), `httpx` (HTTP), `pandas` + `openpyxl` (Excel),
@@ -303,11 +304,14 @@ Unirlos es la homologación (H7): los nombres no coinciden siempre ("SAN JOAQUIN
 abreviaturas, 13,2 kV vs 013) y requiere revisión humana. Hasta entonces, cruzar contratos con
 retiros o CMg por barra no es confiable.
 
-### 7.5 🟡 La tarea diaria no avisa si falla
+### 7.5 🟡 (en parte resuelto 2026-10-16, mejora 8.5) La tarea diaria no avisaba si fallaba
 
 Si `actualizar` falla en la madrugada (API caída, red, clave vencida), el código de salida es 1,
-pero nadie lo ve: no hay archivo de log, ni correo, ni alerta. Y la tarea programada de Windows
-todavía no existe.
+pero nadie lo ve: no había archivo de log, ni correo, ni alerta.
+**Arreglo aplicado (8.5):** cada corrida anota todo en `data/logs/contratos_AAAAMMDD.log`; si termina
+con 1 o 3, deja `data/alertas/ALERTA_AAAAMMDD_HHMMSS.txt` con el comando, el código, qué hacer y la
+salida completa. **Sigue vigente:** la tarea programada no existe (decisión del usuario, ADR-C08) y
+nadie recibe un aviso activo: hay que mirar la carpeta `data/alertas`.
 
 ### 7.6 🟡 Dependencia de una API no documentada (atenuado con 8.7)
 
@@ -320,7 +324,7 @@ desconocido, números con coma) y termina con código 3 si algo cambió. Excel r
 ### 7.7 🟡 La clave está en texto plano en el `.env`
 
 `SecretStr` evita que se imprima, pero el archivo `.env` la tiene legible para cualquiera con
-acceso a la carpeta del proyecto. (Además, la clave de `postgres` apareció en el chat el
+acceso a la carpeta del proyecto. **Riesgo aceptado por el usuario (ADR-C09, 2026-10-16).** (Además, la clave de `postgres` apareció en el chat el
 2026-10-15: se recomendó cambiarla.)
 
 ### 7.8 🟡 Reglas que dependen de la forma del Excel
@@ -353,14 +357,14 @@ acceso a la carpeta del proyecto. (Además, la clave de `postgres` apareció en 
 | 8.2 ✅ | Guardar `fecha_ingreso` también en SQL y reconstruirla desde Bronze si falta el control (el Excel más antiguo donde aparece cada ID); `fecha_suscripcion` como referencia de antigüedad real | 7.2 | bajo |
 | 8.3 ✅ | Tabla de historial en SQL (`contrato_historial`: una fila por contrato y versión, solo cuando algo cambia) y una lista de contratos que desaparecieron | 7.3 | medio |
 | 8.4 | Homologación de puntos a barras CMg con tabla de equivalencias editable y revisión humana (como `domain/barras.py` de `cmg-ingesta`) | 7.4 | alto |
-| 8.5 | Tarea programada diaria + log a archivo + alerta (correo o archivo en `data/alertas/`) cuando el código de salida no sea 0 | 7.5 | bajo |
-| 8.6 | Guardar la clave en el Administrador de credenciales de Windows o en `pgpass.conf` en vez del `.env` | 7.7 | bajo |
+| 8.5 ✅ (parcial) | Tarea programada diaria + log a archivo + alerta (correo o archivo en `data/alertas/`) cuando el código de salida no sea 0 | 7.5 | bajo |
+| 8.6 ✖ | Guardar la clave en el Administrador de credenciales de Windows o en `pgpass.conf` en vez del `.env` | 7.7 | bajo |
 | 8.7 ✅ | Contrato de datos del Excel: lista de columnas esperadas y aviso si aparecen columnas nuevas o cambian de forma (como `quality/deriva.py` de `cmg-ingesta`) | 7.6, 7.8 | medio |
 | 8.8 | GitHub Actions con `ruff`, `mypy` y `pytest` en cada push | 7.9 | bajo |
 | 8.9 | La API de descarga sobre `cmg_lectura` (ADR-C04) | objetivo pendiente | medio |
 | 8.10 ✅ | Tests que simulen un corte entre escribir `.tmp` y renombrar (en Bronze y Silver), como `cmg-ingesta` B9 | garantía de la sección 6 | bajo |
 
-**Orden sugerido:** ~~8.1~~, ~~8.2~~, ~~8.10~~, ~~8.7~~, ~~8.3~~ (hechos) → 8.5 (que la operación diaria
+**Orden sugerido:** ~~8.1~~, ~~8.2~~, ~~8.10~~, ~~8.7~~, ~~8.3~~, ~~8.5~~ (hechos); 8.6 descartada (ADR-C09) → 8.5 (que la operación diaria
 avise) → 8.3 → el resto.
 
 ---
