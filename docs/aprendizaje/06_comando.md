@@ -19,11 +19,11 @@ $LASTEXITCODE                   # el código con que terminó el último comando
 | 2 | comando mal escrito | `--archivoo`, un `--archivo` que no existe |
 | 3 | terminó, pero hay que revisar | IDs repetidos, filas sin ID, `estado` con Silver vacío |
 
-**La fecha de los datos** sale del nombre que puso Bronze (`Contratos_publica_AAAAMMDD_...`):
-reprocesar un Excel viejo calcula la vigencia contra SU fecha, no contra hoy.
+**Dos fechas:** `fecha_datos` sale del nombre que puso Bronze (`Contratos_publica_AAAAMMDD_...`):
+dice de qué Excel salió cada fila. La vigencia se calcula contra el día en que se procesa (mejora 8.1).
 
 **Log y alertas (mejora 8.5):** todo lo que muestra el comando queda en
 `data\logs\contratos_AAAAMMDD.log`. Si termina con 1 o 3, además deja
-`datalertas\ALERTA_AAAAMMDD_HHMMSS.txt` con el comando, el código, qué hacer y la salida.
+`data\alertas\ALERTA_AAAAMMDD_HHMMSS.txt` con el comando, el código, qué hacer y la salida.
 
 **Frase:** un comando por acción y un código de salida que una tarea programada puede leer.
