@@ -25,7 +25,7 @@ quedan con la fecha de esa carga (2026-10-15): la base empieza ese día.
 | sin energía (quedan en 0, RN-09) | 1.549 |
 | años aislados excluidos (RN-07) | 58 |
 | vigencia calculada ≠ "Estado Contrato" | 2 |
-| tiempo | 45 s (la mayor parte, leer el Excel) |
+| tiempo | 45 s en la primera corrida (medido después, 2026-10-16: leer el Excel 2,8 s y transformar 2,7 s; el resto no se midió, probablemente el primer acceso a la red) |
 
 **Frase:** Silver deja el Excel en dos tablas limpias, con reglas probadas, sin repetir la
 energía del contrato en cada barra y sin perder la fecha en que cada contrato llegó.

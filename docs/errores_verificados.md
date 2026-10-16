@@ -337,6 +337,14 @@ y `PPA_` en `ppa-pipeline`. Si una entrada aplica solo a un proyecto, decirlo ex
   si se corta en el byte 2.592.000.000?". Los tests con archivos locales chicos nunca se cortan:
   el corte hay que simularlo.
 
+### A23. Atribuir un tiempo a una causa sin medir el desglose (solo `contratos-ingesta`)
+- **Error (2026-10-15):** en la guía 05 escribí "45 s (la mayor parte, leer el Excel)". Solo había
+  medido el total.
+- **Realidad (2026-10-16):** leer el Excel 2,8 s y transformar 2,7 s; el resto de los 45 s no era
+  ni lo uno ni lo otro (el primer acceso a la red no se midió).
+- **Lección:** es A14 otra vez: una cifra o una atribución ("la mayor parte") sale de una medición
+  a la vista. Si solo se midió el total, se escribe solo el total.
+
 ---
 
 ## B. Procesamiento de datos (del código que se está portando)

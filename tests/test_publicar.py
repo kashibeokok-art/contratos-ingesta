@@ -11,8 +11,9 @@ contratos_carga, igual que en el servidor.
 import os
 import uuid
 from collections.abc import Iterator
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import psycopg
@@ -57,7 +58,7 @@ def _silver(carpeta: Path, ids: list[str]) -> Path:
             for i in ids
         ],
     )  # fmt: skip
-    contratos, puntos, conteo = silver.transformar(silver.leer_excel(excel), HOY)
+    contratos, puntos, conteo = silver.transformar(silver.leer_excel(excel), HOY, HOY)
     contratos, fechas = silver.marcar_fecha_ingreso(contratos, {}, HOY)
     silver.escribir(carpeta, contratos, puntos, fechas, excel.name, conteo)
     return carpeta
@@ -144,3 +145,38 @@ def test_cmg_lectura_lee_pero_no_escribe(base: str, tmp_path: Path) -> None:
         assert con.execute("SELECT count(*) FROM contratos.contrato").fetchone() == (1,)
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             con.execute("DELETE FROM contratos.contrato")
+
+
+def test_la_vista_recalcula_la_vigencia_con_el_dia_de_chile(base: str, tmp_path: Path) -> None:
+    """Mejora 8.1: Silver calculado en 2020 dice vigente; la vista, hoy, dice que no."""
+    carpeta = tmp_path / "s"
+    carpeta.mkdir()
+    excel = _excel(
+        carpeta / "Contratos_publica_20200101_120000.xlsx",
+        [
+            _fila(
+                **{
+                    "Id Contrato": "1",
+                    "Término": "2025-01-01 00:00:00",
+                    "Estado Contrato": "Vigente",
+                }
+            )
+        ],
+    )
+    antiguo = date(2020, 1, 1)
+    contratos, puntos, conteo = silver.transformar(silver.leer_excel(excel), antiguo, antiguo)
+    contratos, fechas = silver.marcar_fecha_ingreso(contratos, {}, antiguo)
+    silver.escribir(carpeta, contratos, puntos, fechas, excel.name, conteo)
+    with psycopg.connect(base) as con:
+        publicar.publicar(con, carpeta)
+
+    lectura = base.replace("user=contratos_carga", "user=cmg_lectura")
+    with psycopg.connect(lectura) as con:
+        tabla = con.execute("SELECT vigente FROM contratos.contrato").fetchone()
+        vista = con.execute(
+            "SELECT vigente, estado_distinto, dias_para_vencer, fecha_calculo "
+            "FROM contratos.contrato_hoy"
+        ).fetchone()
+    hoy_chile = datetime.now(ZoneInfo("America/Santiago")).date()
+    assert tabla == (True,)  # lo guardado, calculado en 2020
+    assert vista == (False, True, (date(2025, 1, 1) - hoy_chile).days, hoy_chile)

@@ -29,7 +29,7 @@ COLUMNAS_CONTRATO = [
     "fecha_termino", "fecha_termino_renovacion", "fecha_termino_efectiva", "vigente",
     "estado_distinto", "dias_para_vencer", "energia_max_anual_gwh", "energia_promedio_anual_gwh",
     "energia_min_anual_gwh", "anios_energia", "anios_aislados", "potencia_max_anual_mw",
-    "fecha_datos", "fecha_ingreso",
+    "fecha_datos", "fecha_calculo", "fecha_ingreso",
 ]  # fmt: skip
 COLUMNAS_PUNTO = [
     "id_contrato", "tipo_punto", "orden", "texto", "subestacion", "propietario", "tension_kv",

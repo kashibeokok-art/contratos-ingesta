@@ -61,7 +61,7 @@ separadas para no repetir la energía del contrato en cada barra.
 
 | # | Tema | Regla (entre paréntesis, lo que hacía `OLD/main_diario.py`) |
 |---|---|---|
-| 1 | Vigencia | término efectivo = mayor entre Término y Término de renovación; columna `vigente`. Manda la fecha; `estado_distinto` marca si 'Estado Contrato' dice otra cosa (decisión del usuario, 2026-10-15) (OLD: `Término >= hoy`) |
+| 1 | Vigencia | término efectivo = mayor entre Término y Término de renovación; columna `vigente` calculada contra el día en que se procesa (`fecha_calculo`) y vista SQL `contrato_hoy` que la recalcula al consultar (mejora 8.1). Manda la fecha; `estado_distinto` marca si 'Estado Contrato' dice otra cosa (decisión del usuario, 2026-10-15) (OLD: `Término >= hoy`) |
 | 2 | Contratos ya vistos | cada descarga reemplaza los datos; se conserva `fecha_ingreso` (OLD: nunca actualizaba un contrato existente) |
 | 3 | Nuevo / antiguo | `fecha_ingreso` = fecha en que el contrato entró por primera vez a la base (pedido del usuario, 2026-10-15) y `dias_para_vencer` (OLD: regla Inicio ≥ ayer y visto < 1 semana) |
 | 4 | Energía | promedio, máximo y mínimo anual en GWh, sin años aislados, vacío = 0; más años usados y aislados |
@@ -125,3 +125,7 @@ separadas para no repetir la energía del contrato en cada barra.
   usuario: manda la fecha y se agrega la marca `estado_distinto`.
 - Paso 6: `estado_distinto` agregado; comando `contratos` probado contra `18. Contratos CEN` (exit 0).
 - Paso 7: esquema en `cmg_cen` (decisión del usuario) corrido en el servidor por el usuario; `publicar-sql` probado en local. La clave de `postgres` apareció en el chat: se recomendó cambiarla.
+
+### 2026-10-16 — Sesión 2
+- `docs/funcionamiento.md`: funcionamiento detallado, diccionario de datos, garantías, 9 puntos débiles y 10 mejoras priorizadas (la más urgente: la vigencia envejece si el Excel no cambia, §7.1). Error A23 registrado (tiempo atribuido sin medir).
+- Mejora 8.1 aplicada: `fecha_calculo` + vista `contratos.contrato_hoy` (día de Chile). El usuario debe volver a correr `sql/esquema_contratos.sql` en el servidor (agrega la columna y la vista).

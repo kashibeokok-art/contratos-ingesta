@@ -38,6 +38,9 @@ uv run contratos publicar-sql --forzar
 uv run contratos actualizar      # ahora también publica si hay CONT_PG_CONEXION
 ```
 
+**Vista `contratos.contrato_hoy` (mejora 8.1):** recalcula `vigente` y `dias_para_vencer` con el
+día de Chile en cada consulta; la API debe leer la vista, no la tabla.
+
 **Medido (copia local, 2026-10-15):** 11.237 contratos + 14.328 puntos en 2,7 s.
 
 **Frase:** la base se reemplaza entera o no se toca; nunca queda a medias.

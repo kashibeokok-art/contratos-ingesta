@@ -84,8 +84,11 @@ CREATE TABLE IF NOT EXISTS contratos.contrato (
     anios_aislados              text,          -- años excluidos por RN-07
     potencia_max_anual_mw       double precision NOT NULL,
     fecha_datos                 date NOT NULL, -- fecha del Excel del CEN que se cargó
+    fecha_calculo               date,          -- día contra el que se calculó `vigente` (8.1)
     fecha_ingreso               date NOT NULL  -- primer día en que el contrato entró a la base
 );
+-- Para bases creadas antes de la mejora 8.1 (2026-10-16): agrega la columna si falta.
+ALTER TABLE contratos.contrato ADD COLUMN IF NOT EXISTS fecha_calculo date;
 
 CREATE TABLE IF NOT EXISTS contratos.contrato_barra (
     id_contrato  text NOT NULL REFERENCES contratos.contrato (id_contrato) ON DELETE CASCADE,
@@ -113,6 +116,31 @@ CREATE TABLE IF NOT EXISTS contratos.carga (
     puntos          integer NOT NULL,
     cargado_en      timestamptz NOT NULL DEFAULT now()
 );
+
+-- ------------------------------------------------------------------ vista para consultar
+
+-- La vigencia recalculada HOY, cada vez que se consulta (mejora 8.1): aunque la carga no
+-- corra por días, quien consulte nunca ve un contrato vencido como vigente. "Hoy" es el día
+-- de Chile, no el del servidor (si el servidor está en UTC, después de las 21:00 de Chile su
+-- fecha ya es mañana). La API debe leer ESTA vista.
+CREATE OR REPLACE VIEW contratos.contrato_hoy AS
+SELECT
+    c.id_contrato, c.suministrador, c.rut_suministrador, c.tipo_suministrador,
+    c.tipo_contrato, c.red_distribuidora, c.tipo_cliente, c.cliente, c.rut_cliente,
+    c.estado_fuente, c.region, c.sector_economico, c.subsector_economico,
+    c.fecha_suscripcion, c.fecha_inicio, c.fecha_termino, c.fecha_termino_renovacion,
+    c.fecha_termino_efectiva,
+    coalesce(c.fecha_termino_efectiva >= h.hoy, false)                    AS vigente,
+    (coalesce(lower(trim(c.estado_fuente)) = 'vigente', false)
+        <> coalesce(c.fecha_termino_efectiva >= h.hoy, false))            AS estado_distinto,
+    c.fecha_termino_efectiva - h.hoy                                      AS dias_para_vencer,
+    c.energia_max_anual_gwh, c.energia_promedio_anual_gwh, c.energia_min_anual_gwh,
+    c.anios_energia, c.anios_aislados, c.potencia_max_anual_mw,
+    c.fecha_datos, h.hoy AS fecha_calculo, c.fecha_ingreso
+FROM contratos.contrato c
+CROSS JOIN (SELECT (now() AT TIME ZONE 'America/Santiago')::date AS hoy) h;
+
+GRANT SELECT ON contratos.contrato_hoy TO cmg_lectura;
 
 RESET ROLE;
 COMMIT;

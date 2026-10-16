@@ -110,10 +110,14 @@ def _texto(valor: object) -> str | None:
     return t or None
 
 
-def transformar(tabla: pd.DataFrame, dia: date) -> tuple[pd.DataFrame, pd.DataFrame, Conteo]:
+def transformar(
+    tabla: pd.DataFrame, fecha_datos: date, hoy: date
+) -> tuple[pd.DataFrame, pd.DataFrame, Conteo]:
     """Excel -> (contratos, contrato_barra, conteo). Sin archivos: se prueba con datos a mano.
 
-    `dia` = la fecha de los datos (la del Excel de Bronze): la vigencia se calcula contra ella.
+    - `fecha_datos`: la del Excel de Bronze (procedencia: de qué versión salió cada fila).
+    - `hoy`: el día contra el que se calcula la vigencia (mejora 8.1). Antes era `fecha_datos`,
+      y si el CEN no cambiaba el Excel por días, un contrato vencido seguía "vigente".
     """
     c_texto = {_columna(tabla, k): v for k, v in TEXTOS.items()}
     c_fecha = {_columna(tabla, k): v for k, v in FECHAS.items()}
@@ -143,8 +147,8 @@ def transformar(tabla: pd.DataFrame, dia: date) -> tuple[pd.DataFrame, pd.DataFr
             r["fecha_termino_renovacion"],  # type: ignore[arg-type]
         )
         r["fecha_termino_efectiva"] = termino
-        r["vigente"] = fechas.vigente(termino, dia)
-        r["dias_para_vencer"] = fechas.dias_para_vencer(termino, dia)
+        r["vigente"] = fechas.vigente(termino, hoy)
+        r["dias_para_vencer"] = fechas.dias_para_vencer(termino, hoy)
         conteo["vigentes" if r["vigente"] else "no_vigentes"] += 1
         # Manda la fecha (decisión del usuario, 2026-10-15); `estado_distinto` marca los
         # contratos donde 'Estado Contrato' de la fuente dice otra cosa, para revisarlos.
@@ -163,7 +167,8 @@ def transformar(tabla: pd.DataFrame, dia: date) -> tuple[pd.DataFrame, pd.DataFr
         conteo["anios_aislados"] += len(resumen["anios_aislados"])
         potencias = [p for p in (energia.numero(fila[c]) for c in c_potencia.values()) if p]
         r["potencia_max_anual_mw"] = max(potencias) if potencias else 0.0
-        r["fecha_datos"] = dia
+        r["fecha_datos"] = fecha_datos
+        r["fecha_calculo"] = hoy
         contratos.append(r)
 
         for origen, tipo_punto in c_punto.items():

@@ -72,7 +72,7 @@ def excel(tmp_path: Path) -> Path:
 
 
 def test_transformar_aplica_las_reglas(excel: Path) -> None:
-    contratos, puntos, conteo = silver.transformar(silver.leer_excel(excel), HOY)
+    contratos, puntos, conteo = silver.transformar(silver.leer_excel(excel), HOY, HOY)
     c = contratos.set_index("id_contrato")
 
     assert list(c.index) == ["100", "200", "300"]  # ADR-C03: Silver guarda TODOS
@@ -105,22 +105,47 @@ def test_estado_distinto_marca_sin_cambiar_la_vigencia(tmp_path: Path) -> None:
         [_fila(**{"Id Contrato": "13361", "Término": "2029-12-31 00:00:00",
                   "Fecha Término Renovación": "31-12-2025", "Estado Contrato": "No vigente"})],
     )  # fmt: skip
-    contratos, _p, conteo = silver.transformar(silver.leer_excel(ruta), HOY)
+    contratos, _p, conteo = silver.transformar(silver.leer_excel(ruta), HOY, HOY)
 
     assert bool(contratos.loc[0, "vigente"]) is True  # manda la fecha
     assert bool(contratos.loc[0, "estado_distinto"]) is True  # pero queda marcado
     assert conteo["estado_distinto"] == 1
 
 
+def test_la_vigencia_se_calcula_contra_hoy_no_contra_el_excel(tmp_path: Path) -> None:
+    """Mejora 8.1. Escenario: el Excel es del 1-oct y no cambió; hoy es 20-oct. Un contrato
+    que vence el 10-oct ya NO está vigente, aunque al 1-oct lo estaba."""
+    ruta = _excel(
+        tmp_path / "x.xlsx",
+        [
+            _fila(
+                **{
+                    "Id Contrato": "1",
+                    "Término": "2026-10-10 00:00:00",
+                    "Estado Contrato": "Vigente",
+                }
+            )
+        ],
+    )
+    contratos, _p, _c = silver.transformar(
+        silver.leer_excel(ruta), date(2026, 10, 1), date(2026, 10, 20)
+    )
+    fila = contratos.iloc[0]
+
+    assert bool(fila["vigente"]) is False
+    assert fila["dias_para_vencer"] == -10
+    assert (fila["fecha_datos"], fila["fecha_calculo"]) == (date(2026, 10, 1), date(2026, 10, 20))
+
+
 def test_falta_una_columna_se_detiene(tmp_path: Path) -> None:
     tabla = pd.DataFrame({"Id Contrato": ["1"]})
 
     with pytest.raises(silver.FormatoDesconocido, match="Empresa Suministradora"):
-        silver.transformar(tabla, HOY)
+        silver.transformar(tabla, HOY, HOY)
 
 
 def test_fecha_ingreso_se_conserva_entre_corridas(excel: Path) -> None:
-    contratos, _p, _c = silver.transformar(silver.leer_excel(excel), HOY)
+    contratos, _p, _c = silver.transformar(silver.leer_excel(excel), HOY, HOY)
     conocidas = {"100": "2026-01-01"}
 
     marcados, nuevas = silver.marcar_fecha_ingreso(contratos, conocidas, HOY)
@@ -131,7 +156,7 @@ def test_fecha_ingreso_se_conserva_entre_corridas(excel: Path) -> None:
 
 
 def test_un_excel_mas_viejo_deja_la_fecha_mas_antigua(excel: Path) -> None:
-    contratos, _p, _c = silver.transformar(silver.leer_excel(excel), date(2026, 9, 1))
+    contratos, _p, _c = silver.transformar(silver.leer_excel(excel), date(2026, 9, 1), HOY)
 
     _m, nuevas = silver.marcar_fecha_ingreso(contratos, {"100": "2026-10-15"}, date(2026, 9, 1))
 
@@ -141,7 +166,7 @@ def test_un_excel_mas_viejo_deja_la_fecha_mas_antigua(excel: Path) -> None:
 def test_escribir_deja_las_tablas_y_el_control(excel: Path, tmp_path: Path) -> None:
     destino = tmp_path / "silver"
     destino.mkdir()
-    contratos, puntos, conteo = silver.transformar(silver.leer_excel(excel), HOY)
+    contratos, puntos, conteo = silver.transformar(silver.leer_excel(excel), HOY, HOY)
     contratos, fechas = silver.marcar_fecha_ingreso(contratos, {}, HOY)
 
     silver.escribir(destino, contratos, puntos, fechas, excel.name, conteo)

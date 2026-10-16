@@ -77,7 +77,7 @@ def procesar(
         destino = rutas.silver(cfg)
         dia = fecha_del_archivo(ruta)
         typer.echo(f"Procesando {ruta.name} (datos del {dia})...")
-        contratos, puntos, conteo = silver.transformar(silver.leer_excel(ruta), dia)
+        contratos, puntos, conteo = silver.transformar(silver.leer_excel(ruta), dia, date.today())
         contratos, fechas = silver.marcar_fecha_ingreso(
             contratos, silver.leer_control(destino), dia
         )
@@ -162,7 +162,9 @@ def estado() -> None:
     por_vencer = vigentes[vigentes["dias_para_vencer"] <= 180]
     typer.echo(
         f"Silver: {len(tabla):,} contratos, {len(vigentes):,} vigentes "
-        f"(datos del {tabla['fecha_datos'].iloc[0]}); {len(por_vencer):,} vencen en 180 días."
+        f"(Excel del {tabla['fecha_datos'].iloc[0]}, "
+        f"vigencia al {tabla['fecha_calculo'].iloc[0]}); "
+        f"{len(por_vencer):,} vencen en 180 días."
     )
     _salir(OK)
 
