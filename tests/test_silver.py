@@ -7,15 +7,12 @@ import pandas as pd
 import pytest
 from openpyxl import Workbook
 
-from contratos_ingesta import silver
+from contratos_ingesta import deriva, silver
 
+#: Las 30 columnas fijas REALES (las mismas que conoce `deriva`) + algunos años: si el Excel
+#: de prueba no tuviera la forma real, la revisión de deriva (8.7) lo marcaría.
 COLUMNAS = [
-    "Id Contrato", "Empresa Suministradora", "Rut Suministradora", "Tipo Suministrador",
-    "Tipo Contrato", "Red Distribuidora", "Tipo Cliente", "Empresa Cliente", "Rut Empresa Cliente",
-    "Suscripción", "Inicio", "Término", "Fecha Renovación", "Fecha Inicio Renovación",
-    "Fecha Término Renovación", "Estado Contrato", "Afecto Ley", "Régimen Compra Potencia",
-    "Correo Cliente", "Región", "Dirección Comercial", "Sector Económico", "Subsector Económico",
-    "Listado de puntos de Suministro", "Listado de puntos de Retiro",
+    *deriva.COLUMNAS_CONOCIDAS,
     "Energía 2026", "Energía 2027", "Energía 2040", "Potencia 2026", "Potencia 2027",
 ]  # fmt: skip
 

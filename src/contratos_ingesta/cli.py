@@ -19,7 +19,7 @@ import psycopg
 import typer
 from pydantic import ValidationError
 
-from contratos_ingesta import bronze, publicar, rutas, silver
+from contratos_ingesta import bronze, deriva, publicar, rutas, silver
 from contratos_ingesta.config import Settings
 
 OK, ERROR, USO, REVISAR = 0, 1, 2, 3
@@ -77,7 +77,9 @@ def procesar(
         destino = rutas.silver(cfg)
         dia = fecha_del_archivo(ruta)
         typer.echo(f"Procesando {ruta.name} (datos del {dia})...")
-        contratos, puntos, conteo = silver.transformar(silver.leer_excel(ruta), dia, date.today())
+        tabla = silver.leer_excel(ruta)
+        hallazgos = deriva.revisar(tabla)  # mejora 8.7: ¿cambió la forma del Excel?
+        contratos, puntos, conteo = silver.transformar(tabla, dia, date.today())
         conocidas = silver.leer_control(destino)
         if conocidas is None:  # mejora 8.2: el control falta o está dañado
             excels = [(fecha_del_archivo(p), p) for p in bronze.todos(rutas.bronze(cfg))]
@@ -104,7 +106,10 @@ def procesar(
     hay = {k: v for k, v in revisar.items() if conteo[k]}  # type: ignore[literal-required]
     for clave, texto in hay.items():
         typer.echo(f"  revisar: {conteo[clave]:,} {texto}")  # type: ignore[literal-required]
-    _salir(REVISAR if conteo["ids_repetidos"] or conteo["sin_id"] else OK)
+    for h in hallazgos:
+        typer.echo(f"  {h['severidad']} (el Excel cambió de forma): {h['detalle']}")
+    avisos = any(h["severidad"] == "aviso" for h in hallazgos)
+    _salir(REVISAR if conteo["ids_repetidos"] or conteo["sin_id"] or avisos else OK)
 
 
 @app.command(name="publicar-sql")

@@ -58,7 +58,8 @@ de esa vez no se midió (error A23).
 | `bronze.py` | 148 | API → Excel en Bronze, solo si cambió |
 | `silver.py` | 240 | Excel → `contratos` + `contrato_barra` + `fecha_ingreso` |
 | `publicar.py` | 142 | Silver → PostgreSQL en una transacción |
-| `cli.py` | 171 | Comandos y códigos de salida |
+| `cli.py` | — | Comandos y códigos de salida |
+| `deriva.py` | — | ¿El Excel cambió de forma? (mejora 8.7) |
 | `sql/esquema_contratos.sql` | 118 | Esquema, tablas y permisos en `cmg_cen` (lo corre el administrador) |
 
 Dependencias: `pydantic-settings` (configuración), `httpx` (HTTP), `pandas` + `openpyxl` (Excel),
@@ -291,11 +292,13 @@ Si `actualizar` falla en la madrugada (API caída, red, clave vencida), el códi
 pero nadie lo ve: no hay archivo de log, ni correo, ni alerta. Y la tarea programada de Windows
 todavía no existe.
 
-### 7.6 🟡 Dependencia de una API no documentada
+### 7.6 🟡 Dependencia de una API no documentada (atenuado con 8.7)
 
 La API Gateway del CEN no es una API publicada con contrato: el CEN la usa en su sitio. Ya cambió
 una vez (la forma de `data`, que rompió a `OLD/`). El programa se detiene con un mensaje claro si
-cambia, pero no se adapta solo.
+cambia, pero no se adapta solo. Desde la mejora 8.7, `procesar` además compara cada Excel con
+la forma conocida (`deriva.py`: columnas nuevas o que faltan, años nuevos, fechas con formato
+desconocido, números con coma) y termina con código 3 si algo cambió. Excel real: sin hallazgos.
 
 ### 7.7 🟡 La clave está en texto plano en el `.env`
 
@@ -307,7 +310,7 @@ acceso a la carpeta del proyecto. (Además, la clave de `postgres` apareció en 
 
 - La fecha de los datos se deduce del **nombre** del archivo de Bronze; `procesar --archivo` con
   un Excel de otro nombre se detiene (código 1, no 2).
-- `numero("1,400")` = 1,4: la coma se toma como decimal. Hoy el Excel real no trae ningún valor
+- `numero("1,400")` = 1,4: la coma se toma como decimal (desde 8.7, un valor con coma da aviso). Hoy el Excel real no trae ningún valor
   con coma (0 casos, verificado 2026-10-16); si el CEN empezara a usar coma de miles, la energía
   quedaría 1.000 veces menor sin error.
 - La regla de años aislados (RN-07) se aplica a la energía, no a la potencia.
@@ -335,12 +338,12 @@ acceso a la carpeta del proyecto. (Además, la clave de `postgres` apareció en 
 | 8.4 | Homologación de puntos a barras CMg con tabla de equivalencias editable y revisión humana (como `domain/barras.py` de `cmg-ingesta`) | 7.4 | alto |
 | 8.5 | Tarea programada diaria + log a archivo + alerta (correo o archivo en `data/alertas/`) cuando el código de salida no sea 0 | 7.5 | bajo |
 | 8.6 | Guardar la clave en el Administrador de credenciales de Windows o en `pgpass.conf` en vez del `.env` | 7.7 | bajo |
-| 8.7 | Contrato de datos del Excel: lista de columnas esperadas y aviso si aparecen columnas nuevas o cambian de forma (como `quality/deriva.py` de `cmg-ingesta`) | 7.6, 7.8 | medio |
+| 8.7 ✅ | Contrato de datos del Excel: lista de columnas esperadas y aviso si aparecen columnas nuevas o cambian de forma (como `quality/deriva.py` de `cmg-ingesta`) | 7.6, 7.8 | medio |
 | 8.8 | GitHub Actions con `ruff`, `mypy` y `pytest` en cada push | 7.9 | bajo |
 | 8.9 | La API de descarga sobre `cmg_lectura` (ADR-C04) | objetivo pendiente | medio |
 | 8.10 ✅ | Tests que simulen un corte entre escribir `.tmp` y renombrar (en Bronze y Silver), como `cmg-ingesta` B9 | garantía de la sección 6 | bajo |
 
-**Orden sugerido:** ~~8.1~~, ~~8.2~~, ~~8.10~~ (hechos) → 8.5 (que la operación diaria
+**Orden sugerido:** ~~8.1~~, ~~8.2~~, ~~8.10~~, ~~8.7~~ (hechos) → 8.5 (que la operación diaria
 avise) → 8.3 → el resto.
 
 ---

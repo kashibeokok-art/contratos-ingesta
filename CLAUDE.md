@@ -131,3 +131,4 @@ separadas para no repetir la energía del contrato en cada barra.
 - Mejora 8.1 aplicada: `fecha_calculo` + vista `contratos.contrato_hoy` (día de Chile). El usuario debe volver a correr `sql/esquema_contratos.sql` en el servidor (agrega la columna y la vista).
 - Mejora 8.2: si `_control.json` falta o está dañado, `procesar` reconstruye `fecha_ingreso` desde todos los Excel de Bronze (2,1 s por Excel).
 - Mejora 8.10: el test que inyecta un fallo en cada renombre REPRODUJO un defecto real (Silver podía quedar con una tabla nueva y otra vieja). Corregido: Silver se escribe como conjunto con `.old` y vuelta atrás; Bronze borra el `.part` si falla.
+- Mejora 8.7: `deriva.py` compara cada Excel con la forma conocida (30 columnas, años 1986–2060, fechas, números con coma); `procesar` termina con 3 si hay avisos. El Excel de prueba de los tests ahora tiene las 30 columnas reales. Excel real: sin hallazgos.
