@@ -222,6 +222,18 @@ Compra Potencia`, listados de potencia conectada, número de cliente, distribuid
 Las mismas columnas de `contrato`, pero `vigente`, `estado_distinto`, `dias_para_vencer` y
 `fecha_calculo` se recalculan con el día de Chile en cada consulta. **Es la que debe leer la API.**
 
+### `contrato_historial` (solo SQL, mejora 8.3)
+
+| Columna | Significado |
+|---|---|
+| `carga_id` | en qué carga se detectó |
+| `id_contrato` | el contrato |
+| `cambio` | `alta` (apareció), `cambio` (cambió algún dato), `baja` (desapareció del Excel) |
+| `columnas` | las columnas que cambiaron (solo en `cambio`) |
+| `antes`, `despues` | los datos del contrato antes y después (JSON) |
+
+Ejemplo: "¿cómo cambió el contrato 9430?" → `SELECT * FROM contratos.contrato_historial WHERE id_contrato = '9430' ORDER BY carga_id`.
+
 ### `carga` (solo SQL)
 
 Una fila por carga: `fecha_datos`, `archivo_origen`, `sha256_silver`, filas y `cargado_en`.
@@ -272,12 +284,17 @@ Bronze (el Excel más antiguo donde aparece cada ID; ~2,1 s por Excel) y lo avis
 vigente:** la primera carga deja a todos con la fecha de inicio de la base; `fecha_suscripcion` es
 la referencia de antigüedad real.
 
-### 7.3 🟠 Sin historia de los contratos
+### 7.3 ✅ (resuelto 2026-10-16, mejora 8.3) No había historia de los contratos
 
 **Escenario:** el CEN modifica la energía de un contrato o lo quita del Excel. Silver y SQL se
 reemplazan completos: el valor anterior (o el contrato que desapareció) ya no está. Solo queda el
 Excel viejo en Bronze, que habría que reprocesar a mano.
-**Impacto:** no se puede responder "¿cómo cambió este contrato?" ni "¿qué contratos desaparecieron?".
+**Impacto:** no se podía responder "¿cómo cambió este contrato?" ni "¿qué contratos desaparecieron?".
+**Arreglo aplicado (8.3):** `contratos.contrato_historial` anota, dentro de la misma transacción de
+cada carga, las altas, los cambios (con las columnas que cambiaron y sus valores antes/después) y
+las bajas. Lo que depende del día no cuenta como cambio. Verificado con los datos reales: volver a
+subir los mismos 11.237 contratos anota 0 cambios. Pendiente: el historial de los puntos
+(`contrato_barra`) no se guarda.
 
 ### 7.4 🟠 Los puntos no están unidos a las barras del CMg
 
@@ -334,7 +351,7 @@ acceso a la carpeta del proyecto. (Además, la clave de `postgres` apareció en 
 |---|---|---|---|
 | 8.1 ✅ | Calcular `vigente` y `dias_para_vencer` **contra la fecha de hoy al consultar**: una vista SQL `contratos.contrato_hoy` con `current_date`, y en Silver guardar solo `fecha_termino_efectiva`. Alternativa mínima: que `procesar` use la fecha del día, no la del archivo | 7.1 | bajo |
 | 8.2 ✅ | Guardar `fecha_ingreso` también en SQL y reconstruirla desde Bronze si falta el control (el Excel más antiguo donde aparece cada ID); `fecha_suscripcion` como referencia de antigüedad real | 7.2 | bajo |
-| 8.3 | Tabla de historial en SQL (`contrato_historial`: una fila por contrato y versión, solo cuando algo cambia) y una lista de contratos que desaparecieron | 7.3 | medio |
+| 8.3 ✅ | Tabla de historial en SQL (`contrato_historial`: una fila por contrato y versión, solo cuando algo cambia) y una lista de contratos que desaparecieron | 7.3 | medio |
 | 8.4 | Homologación de puntos a barras CMg con tabla de equivalencias editable y revisión humana (como `domain/barras.py` de `cmg-ingesta`) | 7.4 | alto |
 | 8.5 | Tarea programada diaria + log a archivo + alerta (correo o archivo en `data/alertas/`) cuando el código de salida no sea 0 | 7.5 | bajo |
 | 8.6 | Guardar la clave en el Administrador de credenciales de Windows o en `pgpass.conf` en vez del `.env` | 7.7 | bajo |
@@ -343,7 +360,7 @@ acceso a la carpeta del proyecto. (Además, la clave de `postgres` apareció en 
 | 8.9 | La API de descarga sobre `cmg_lectura` (ADR-C04) | objetivo pendiente | medio |
 | 8.10 ✅ | Tests que simulen un corte entre escribir `.tmp` y renombrar (en Bronze y Silver), como `cmg-ingesta` B9 | garantía de la sección 6 | bajo |
 
-**Orden sugerido:** ~~8.1~~, ~~8.2~~, ~~8.10~~, ~~8.7~~ (hechos) → 8.5 (que la operación diaria
+**Orden sugerido:** ~~8.1~~, ~~8.2~~, ~~8.10~~, ~~8.7~~, ~~8.3~~ (hechos) → 8.5 (que la operación diaria
 avise) → 8.3 → el resto.
 
 ---

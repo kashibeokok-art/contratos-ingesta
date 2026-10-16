@@ -37,6 +37,41 @@ COLUMNAS_PUNTO = [
 ]  # fmt: skip
 
 
+#: Lo que depende del DÍA y no de la fuente: no cuenta como cambio de un contrato (ADR-C07).
+COLUMNAS_DEL_DIA = {"vigente", "estado_distinto", "dias_para_vencer", "fecha_calculo",
+                    "fecha_datos", "fecha_ingreso"}  # fmt: skip
+COLUMNAS_HISTORIAL = [c for c in COLUMNAS_CONTRATO if c not in COLUMNAS_DEL_DIA]
+
+
+def sql_historial() -> str:
+    """INSERT del historial: compara `contrato` (lo que había) con `contrato_nuevo` (lo que llega).
+
+    Se arma desde la lista de columnas para que agregar una columna a la tabla no obligue a
+    acordarse de agregarla aquí.
+    """
+    distintas = ", ".join(
+        f"CASE WHEN o.{c} IS DISTINCT FROM n.{c} THEN '{c}' END" for c in COLUMNAS_HISTORIAL
+    )
+    objeto_o = ", ".join(f"'{c}', o.{c}" for c in COLUMNAS_HISTORIAL)
+    objeto_n = ", ".join(f"'{c}', n.{c}" for c in COLUMNAS_HISTORIAL)
+    return f"""
+    INSERT INTO contratos.contrato_historial
+        (carga_id, id_contrato, cambio, columnas, antes, despues)
+    SELECT %(carga_id)s, id_contrato, cambio, columnas, antes, despues FROM (
+        SELECT coalesce(n.id_contrato, o.id_contrato) AS id_contrato,
+            CASE WHEN o.id_contrato IS NULL THEN 'alta'
+                 WHEN n.id_contrato IS NULL THEN 'baja' ELSE 'cambio' END AS cambio,
+            CASE WHEN o.id_contrato IS NULL OR n.id_contrato IS NULL THEN '{{}}'::text[]
+                 ELSE array_remove(ARRAY[{distintas}], NULL) END AS columnas,
+            CASE WHEN o.id_contrato IS NOT NULL THEN jsonb_build_object({objeto_o}) END AS antes,
+            CASE WHEN n.id_contrato IS NOT NULL THEN jsonb_build_object({objeto_n}) END AS despues
+        FROM contratos.contrato o
+        FULL JOIN contratos.contrato_nuevo n ON n.id_contrato = o.id_contrato
+    ) x
+    WHERE cambio <> 'cambio' OR cardinality(columnas) > 0
+    """
+
+
 class DatosInvalidos(ValueError):
     """Silver no cumple lo mínimo para subirlo: no se toca la base."""
 
@@ -46,6 +81,7 @@ class Resultado(TypedDict):
     contratos: int
     puntos: int
     huella: str
+    historial: int  # filas agregadas al historial en esta carga (altas, cambios, bajas)
 
 
 def huella(silver: Path) -> str:
@@ -107,36 +143,42 @@ def publicar(con: psycopg.Connection, silver: Path, forzar: bool = False) -> Res
     actual = huella(silver)
     resultado: Resultado = {
         "subido": False, "contratos": len(filas_c), "puntos": len(filas_p), "huella": actual,
+        "historial": 0,
     }  # fmt: skip
     if not forzar and ultima_huella(con) == actual:
         return resultado
 
+    columnas_c = ", ".join(COLUMNAS_CONTRATO)
     with con.transaction():
-        # DELETE y no TRUNCATE: TRUNCATE bloquea a quien está leyendo; con DELETE la lectura
-        # sigue viendo los datos viejos hasta el COMMIT (MVCC).
+        fila = con.execute(
+            "INSERT INTO contratos.carga (fecha_datos, archivo_origen, sha256_silver, contratos,"
+            " puntos) VALUES (%s, %s, %s, %s, %s) RETURNING carga_id",
+            (contratos["fecha_datos"].iloc[0], _origen(silver), actual, len(filas_c), len(filas_p)),
+        ).fetchone()
+        assert fila is not None
+        carga_id = int(fila[0])
+        # 1) lo nuevo a la tabla de paso
+        con.execute("TRUNCATE contratos.contrato_nuevo")
+        with con.cursor() as cur:
+            with cur.copy(f"COPY contratos.contrato_nuevo ({columnas_c}) FROM STDIN") as copia:
+                for f in filas_c:
+                    copia.write_row(f)
+        # 2) historial: qué apareció, qué cambió y qué desapareció (mejora 8.3)
+        resultado["historial"] = con.execute(sql_historial(), {"carga_id": carga_id}).rowcount
+        # 3) reemplazo. DELETE y no TRUNCATE en las tablas que se consultan: quien está leyendo
+        #    sigue viendo los datos viejos hasta el COMMIT (MVCC).
         con.execute("DELETE FROM contratos.contrato_barra")
         con.execute("DELETE FROM contratos.contrato")
+        con.execute(
+            f"INSERT INTO contratos.contrato ({columnas_c}) "
+            f"SELECT {columnas_c} FROM contratos.contrato_nuevo"
+        )
         with con.cursor() as cur:
-            with cur.copy(
-                f"COPY contratos.contrato ({', '.join(COLUMNAS_CONTRATO)}) FROM STDIN"
-            ) as copia:
-                for fila in filas_c:
-                    copia.write_row(fila)
             with cur.copy(
                 f"COPY contratos.contrato_barra ({', '.join(COLUMNAS_PUNTO)}) FROM STDIN"
             ) as copia:
-                for fila in filas_p:
-                    copia.write_row(fila)
-        con.execute(
-            "INSERT INTO contratos.carga (fecha_datos, archivo_origen, sha256_silver, contratos,"
-            " puntos) VALUES (%s, %s, %s, %s, %s)",
-            (
-                contratos["fecha_datos"].iloc[0],
-                _origen(silver),
-                actual,
-                len(filas_c),
-                len(filas_p),
-            ),
-        )
+                for f in filas_p:
+                    copia.write_row(f)
+        con.execute("TRUNCATE contratos.contrato_nuevo")
     resultado["subido"] = True
     return resultado

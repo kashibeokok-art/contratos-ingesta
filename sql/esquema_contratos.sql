@@ -117,6 +117,28 @@ CREATE TABLE IF NOT EXISTS contratos.carga (
     cargado_en      timestamptz NOT NULL DEFAULT now()
 );
 
+-- ------------------------------------------------------------------ historial (mejora 8.3)
+
+-- Tabla de paso: cada carga copia aquí lo nuevo, lo compara con `contrato` para anotar el
+-- historial y después lo pasa a `contrato`, todo en la misma transacción. Nadie la consulta.
+CREATE TABLE IF NOT EXISTS contratos.contrato_nuevo (LIKE contratos.contrato);
+
+-- Una fila por contrato SOLO cuando cambia algún dato de la fuente:
+--   alta   apareció en el Excel        (antes = NULL)
+--   cambio cambió algún dato           (columnas = las que cambiaron)
+--   baja   desapareció del Excel        (despues = NULL)
+-- Lo que depende del día (vigente, dias_para_vencer, fecha_calculo...) no cuenta como cambio.
+CREATE TABLE IF NOT EXISTS contratos.contrato_historial (
+    historial_id  bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    carga_id      integer NOT NULL REFERENCES contratos.carga (carga_id),
+    id_contrato   text NOT NULL,
+    cambio        text NOT NULL CHECK (cambio IN ('alta', 'cambio', 'baja')),
+    columnas      text[] NOT NULL DEFAULT '{}',
+    antes         jsonb,
+    despues       jsonb
+);
+CREATE INDEX IF NOT EXISTS contrato_historial_id ON contratos.contrato_historial (id_contrato);
+
 -- ------------------------------------------------------------------ vista para consultar
 
 -- La vigencia recalculada HOY, cada vez que se consulta (mejora 8.1): aunque la carga no

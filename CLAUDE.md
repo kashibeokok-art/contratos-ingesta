@@ -107,6 +107,15 @@ separadas para no repetir la energía del contrato en cada barra.
 - **ADR-C06 · 2026-10-15 · Carga = reemplazo completo atómico:** cada carga reemplaza las dos
   tablas dentro de UNA transacción (quien consulta nunca ve una tabla vacía ni a medias) y deja
   una fila en `contratos.carga`. `fecha_ingreso` viene de Silver, así que no se pierde.
+- **ADR-C07 · 2026-10-16 · Historial de contratos (mejora 8.3):** en SQL, una fila por contrato
+  solo cuando cambia algún dato de la fuente (alta, cambio con las columnas que cambiaron, baja si
+  desaparece del Excel). Los datos que dependen del día (`vigente`, `dias_para_vencer`...) no
+  cuentan como cambio.
+- **ADR-C08 · 2026-10-16 · Operación (mejora 8.5):** cada corrida deja un log en `data/logs` y, si
+  termina con código 1 o 3, un archivo de alerta en `data/alertas`. **No** se crea la tarea
+  programada de Windows (decisión del usuario).
+- **ADR-C09 · 2026-10-16 · Riesgo aceptado (8.6):** la clave de PostgreSQL queda en el `.env`
+  (fuera de git, legible para quien acceda a la carpeta). Decisión del usuario.
 
 ## 4. Bitácora
 
@@ -132,3 +141,4 @@ separadas para no repetir la energía del contrato en cada barra.
 - Mejora 8.2: si `_control.json` falta o está dañado, `procesar` reconstruye `fecha_ingreso` desde todos los Excel de Bronze (2,1 s por Excel).
 - Mejora 8.10: el test que inyecta un fallo en cada renombre REPRODUJO un defecto real (Silver podía quedar con una tabla nueva y otra vieja). Corregido: Silver se escribe como conjunto con `.old` y vuelta atrás; Bronze borra el `.part` si falla.
 - Mejora 8.7: `deriva.py` compara cada Excel con la forma conocida (30 columnas, años 1986–2060, fechas, números con coma); `procesar` termina con 3 si hay avisos. El Excel de prueba de los tests ahora tiene las 30 columnas reales. Excel real: sin hallazgos.
+- Mejora 8.3: `contrato_historial` + tabla de paso `contrato_nuevo`; con datos reales, recargar lo mismo anota 0 cambios. El usuario debe volver a correr `sql/esquema_contratos.sql` en el servidor (agrega 2 tablas). Decisiones 8.5 (log + alerta, sin tarea programada) y 8.6 (clave en .env, riesgo aceptado): ADR-C08, C09.

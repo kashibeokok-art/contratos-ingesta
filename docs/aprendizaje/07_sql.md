@@ -38,6 +38,10 @@ uv run contratos publicar-sql --forzar
 uv run contratos actualizar      # ahora también publica si hay CONT_PG_CONEXION
 ```
 
+**Historial (mejora 8.3):** dentro de la misma transacción, lo nuevo se copia a la tabla de paso
+`contrato_nuevo`, se compara con `contrato` y se anotan en `contrato_historial` las altas, los
+cambios (columnas y valores antes/después) y las bajas. Lo que depende del día no cuenta.
+
 **Vista `contratos.contrato_hoy` (mejora 8.1):** recalcula `vigente` y `dias_para_vencer` con el
 día de Chile en cada consulta; la API debe leer la vista, no la tabla.
 

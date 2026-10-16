@@ -133,7 +133,11 @@ def publicar_sql(
     except (psycopg.Error, ValueError, OSError) as e:
         _salir(ERROR, f"No se pudo publicar: {e}")
     if res["subido"]:
-        _salir(OK, f"SQL: {res['contratos']:,} contratos y {res['puntos']:,} puntos reemplazados.")
+        _salir(
+            OK,
+            f"SQL: {res['contratos']:,} contratos y {res['puntos']:,} puntos reemplazados; "
+            f"{res['historial']:,} cambio(s) anotado(s) en el historial.",
+        )
     _salir(OK, "SQL: sin cambios desde la última carga (usa --forzar para subir igual).")
 
 

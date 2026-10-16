@@ -125,6 +125,8 @@ def test_un_fallo_a_la_mitad_deja_la_base_como_estaba(base: str, tmp_path: Path)
         publicar.publicar(con, malo)
 
     assert _contar(base) == (2, 4, 1)  # los 2 contratos de antes siguen ahí
+    with psycopg.connect(base) as con:  # y el historial no anotó nada de la carga fallida
+        assert con.execute("SELECT count(*) FROM contratos.contrato_historial").fetchone() == (2,)
 
 
 def test_ids_repetidos_no_tocan_la_base(base: str, tmp_path: Path) -> None:
@@ -180,3 +182,71 @@ def test_la_vista_recalcula_la_vigencia_con_el_dia_de_chile(base: str, tmp_path:
     hoy_chile = datetime.now(ZoneInfo("America/Santiago")).date()
     assert tabla == (True,)  # lo guardado, calculado en 2020
     assert vista == (False, True, (date(2025, 1, 1) - hoy_chile).days, hoy_chile)
+
+
+def _silver_energia(carpeta: Path, energias: dict[str, str], hoy: date = HOY) -> Path:
+    """Silver con un contrato por ID y su energía 2026 en MWh."""
+    carpeta.mkdir(parents=True, exist_ok=True)
+    excel = _excel(
+        carpeta / "Contratos_publica_20261015_120000.xlsx",
+        [
+            _fila(**{"Id Contrato": i, "Término": "2030-01-01 00:00:00", "Estado Contrato":
+                     "Vigente", "Energía 2026": e})
+            for i, e in energias.items()
+        ],
+    )  # fmt: skip
+    contratos, puntos, conteo = silver.transformar(silver.leer_excel(excel), HOY, hoy)
+    contratos, fechas = silver.marcar_fecha_ingreso(contratos, {}, HOY)
+    silver.escribir(carpeta, contratos, puntos, fechas, excel.name, conteo)
+    return carpeta
+
+
+def _historial(conexion: str) -> list[tuple[str, str, list[str]]]:
+    with psycopg.connect(conexion) as con:
+        filas = con.execute(
+            "SELECT id_contrato, cambio, columnas FROM contratos.contrato_historial "
+            "WHERE carga_id = (SELECT max(carga_id) FROM contratos.carga) ORDER BY id_contrato"
+        ).fetchall()
+    return [(str(a), str(b), list(c)) for a, b, c in filas]
+
+
+def test_historial_anota_altas_cambios_y_bajas(base: str, tmp_path: Path) -> None:
+    """Mejora 8.3: el 1 cambia su energía, el 2 sigue igual, el 3 desaparece, el 4 aparece."""
+    with psycopg.connect(base) as con:
+        primera = publicar.publicar(
+            con, _silver_energia(tmp_path / "a", {"1": "1000", "2": "1000", "3": "1000"})
+        )
+        assert primera["historial"] == 3  # la primera carga: todo es alta
+        segunda = publicar.publicar(
+            con, _silver_energia(tmp_path / "b", {"1": "2000", "2": "1000", "4": "500"})
+        )
+
+    assert segunda["historial"] == 3
+    assert _historial(base) == [
+        (
+            "1",
+            "cambio",
+            ["energia_max_anual_gwh", "energia_promedio_anual_gwh", "energia_min_anual_gwh"],
+        ),
+        ("3", "baja", []),
+        ("4", "alta", []),
+    ]
+    with psycopg.connect(base) as con:
+        antes_despues = con.execute(
+            "SELECT (antes->>'energia_max_anual_gwh')::float, "
+            "(despues->>'energia_max_anual_gwh')::float "
+            "FROM contratos.contrato_historial WHERE cambio = 'cambio'"
+        ).fetchone()
+    assert antes_despues == (1.0, 2.0)
+
+
+def test_un_cambio_solo_del_dia_no_va_al_historial(base: str, tmp_path: Path) -> None:
+    """Silver de otro día (otra fecha_calculo, otros dias_para_vencer): se sube, pero no es un
+    cambio del contrato."""
+    with psycopg.connect(base) as con:
+        publicar.publicar(con, _silver_energia(tmp_path / "a", {"1": "1000"}))
+        otro_dia = publicar.publicar(
+            con, _silver_energia(tmp_path / "b", {"1": "1000"}, date(2026, 11, 1))
+        )
+
+    assert otro_dia["subido"] and otro_dia["historial"] == 0
