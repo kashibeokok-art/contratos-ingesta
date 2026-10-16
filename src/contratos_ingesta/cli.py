@@ -78,9 +78,16 @@ def procesar(
         dia = fecha_del_archivo(ruta)
         typer.echo(f"Procesando {ruta.name} (datos del {dia})...")
         contratos, puntos, conteo = silver.transformar(silver.leer_excel(ruta), dia, date.today())
-        contratos, fechas = silver.marcar_fecha_ingreso(
-            contratos, silver.leer_control(destino), dia
-        )
+        conocidas = silver.leer_control(destino)
+        if conocidas is None:  # mejora 8.2: el control falta o está dañado
+            excels = [(fecha_del_archivo(p), p) for p in bronze.todos(rutas.bronze(cfg))]
+            if len(excels) > 1:
+                typer.echo(
+                    f"  aviso: no hay control de fechas de ingreso en Silver; se reconstruye "
+                    f"desde {len(excels)} Excel de Bronze."
+                )
+            conocidas = silver.reconstruir_fecha_ingreso(excels)
+        contratos, fechas = silver.marcar_fecha_ingreso(contratos, conocidas, dia)
         silver.escribir(destino, contratos, puntos, fechas, ruta.name, conteo)
     except (silver.FormatoDesconocido, ValueError, OSError) as e:
         _salir(ERROR, f"No se pudo procesar: {e}")

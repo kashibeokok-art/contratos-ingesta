@@ -257,13 +257,16 @@ procesa (`fecha_calculo`), y la vista SQL `contratos.contrato_hoy` los recalcula
 cada vez que se consulta. La API debe leer la vista. Probado: con un Silver calculado en 2020, la tabla
 dice `vigente = sí` y la vista, `no`.
 
-### 7.2 🟠 `fecha_ingreso` depende de un solo archivo
+### 7.2 🟡 (en parte resuelto 2026-10-16, mejora 8.2) `fecha_ingreso` dependía de un solo archivo
 
 **Escenario:** alguien borra o pisa `silver/_control.json`. En la siguiente corrida los 11.237
 contratos quedan con `fecha_ingreso` = ese día.
 **Además:** en la primera carga, todos quedaron con 2026-10-15 (la base empezó ese día): no es la
 fecha real en que el CEN publicó cada contrato.
-**Arreglo:** ver 8.2.
+**Arreglo aplicado (8.2):** si el control falta o está dañado, `procesar` lo reconstruye desde
+Bronze (el Excel más antiguo donde aparece cada ID; ~2,1 s por Excel) y lo avisa. **Sigue
+vigente:** la primera carga deja a todos con la fecha de inicio de la base; `fecha_suscripcion` es
+la referencia de antigüedad real.
 
 ### 7.3 🟠 Sin historia de los contratos
 
@@ -324,7 +327,7 @@ acceso a la carpeta del proyecto. (Además, la clave de `postgres` apareció en 
 | # | Mejora | Resuelve | Esfuerzo |
 |---|---|---|---|
 | 8.1 ✅ | Calcular `vigente` y `dias_para_vencer` **contra la fecha de hoy al consultar**: una vista SQL `contratos.contrato_hoy` con `current_date`, y en Silver guardar solo `fecha_termino_efectiva`. Alternativa mínima: que `procesar` use la fecha del día, no la del archivo | 7.1 | bajo |
-| 8.2 | Guardar `fecha_ingreso` también en SQL y reconstruirla desde Bronze si falta el control (el Excel más antiguo donde aparece cada ID); `fecha_suscripcion` como referencia de antigüedad real | 7.2 | bajo |
+| 8.2 ✅ | Guardar `fecha_ingreso` también en SQL y reconstruirla desde Bronze si falta el control (el Excel más antiguo donde aparece cada ID); `fecha_suscripcion` como referencia de antigüedad real | 7.2 | bajo |
 | 8.3 | Tabla de historial en SQL (`contrato_historial`: una fila por contrato y versión, solo cuando algo cambia) y una lista de contratos que desaparecieron | 7.3 | medio |
 | 8.4 | Homologación de puntos a barras CMg con tabla de equivalencias editable y revisión humana (como `domain/barras.py` de `cmg-ingesta`) | 7.4 | alto |
 | 8.5 | Tarea programada diaria + log a archivo + alerta (correo o archivo en `data/alertas/`) cuando el código de salida no sea 0 | 7.5 | bajo |
@@ -334,8 +337,8 @@ acceso a la carpeta del proyecto. (Además, la clave de `postgres` apareció en 
 | 8.9 | La API de descarga sobre `cmg_lectura` (ADR-C04) | objetivo pendiente | medio |
 | 8.10 | Tests que simulen un corte entre escribir `.tmp` y renombrar (en Bronze y Silver), como `cmg-ingesta` B9 | garantía de la sección 6 | bajo |
 
-**Orden sugerido:** ~~8.1~~ (hecho) → 8.5 (que la operación diaria
-avise) → 8.2 → 8.3 → el resto.
+**Orden sugerido:** ~~8.1~~, ~~8.2~~ (hechos) → 8.5 (que la operación diaria
+avise) → 8.3 → el resto.
 
 ---
 

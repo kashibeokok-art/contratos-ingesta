@@ -176,3 +176,21 @@ def test_escribir_deja_las_tablas_y_el_control(excel: Path, tmp_path: Path) -> N
     assert len(pd.read_parquet(destino / "contrato_barra.parquet")) == 3
     assert silver.leer_control(destino) == fechas
     assert not list(destino.glob("*.tmp"))
+
+
+def test_control_faltante_o_danado_devuelve_none(tmp_path: Path) -> None:
+    """Mejora 8.2: None obliga a reconstruir; antes, {} dejaba a todos con la fecha del día."""
+    assert silver.leer_control(tmp_path) is None
+    (tmp_path / "_control.json").write_text("{esto no es json", encoding="utf-8")
+    assert silver.leer_control(tmp_path) is None
+
+
+def test_reconstruir_fecha_ingreso_toma_el_excel_mas_antiguo(tmp_path: Path) -> None:
+    viejo = _excel(tmp_path / "a.xlsx", [_fila(**{"Id Contrato": i}) for i in ("1", "2")])
+    nuevo = _excel(tmp_path / "b.xlsx", [_fila(**{"Id Contrato": i}) for i in ("1", "2", "3")])
+
+    fechas = silver.reconstruir_fecha_ingreso(
+        [(date(2026, 10, 10), nuevo), (date(2026, 10, 1), viejo)]  # desordenados a propósito
+    )
+
+    assert fechas == {"1": "2026-10-01", "2": "2026-10-01", "3": "2026-10-10"}

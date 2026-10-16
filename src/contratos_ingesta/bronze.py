@@ -142,6 +142,11 @@ def descargar(base: Path, cliente: httpx.Client | None = None) -> Resultado:
     return {"ruta": destino, "nuevo": True}
 
 
+def todos(base: Path) -> list[Path]:
+    """Todos los Excel de Bronze que existen, del más antiguo al más nuevo."""
+    return [base / e["archivo"] for e in leer_manifiesto(base) if (base / e["archivo"]).is_file()]
+
+
 def ultimo(base: Path) -> Path | None:
     """El último Excel guardado en Bronze (o None si no hay)."""
     existentes = [e for e in leer_manifiesto(base) if (base / e["archivo"]).is_file()]

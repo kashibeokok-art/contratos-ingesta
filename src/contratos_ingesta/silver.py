@@ -211,13 +211,46 @@ def marcar_fecha_ingreso(
     return contratos, nuevas
 
 
-def leer_control(silver: Path) -> dict[str, str]:
-    """{id_contrato: fecha_ingreso ISO} guardado por las corridas anteriores."""
+def leer_control(silver: Path) -> dict[str, str] | None:
+    """{id_contrato: fecha_ingreso ISO} de las corridas anteriores.
+
+    None = el control no existe o no se puede leer (borrado, dañado): hay que reconstruirlo
+    desde Bronze (`reconstruir_fecha_ingreso`), no partir de cero en silencio (mejora 8.2).
+    """
     ruta = silver / CONTROL
     if not ruta.is_file():
-        return {}
-    datos: dict[str, str] = json.loads(ruta.read_text(encoding="utf-8"))["fecha_ingreso"]
-    return datos
+        return None
+    try:
+        datos = json.loads(ruta.read_text(encoding="utf-8"))["fecha_ingreso"]
+    except (ValueError, KeyError, TypeError):
+        return None
+    if not isinstance(datos, dict):
+        return None
+    return {str(k): str(v) for k, v in datos.items()}
+
+
+def ids_del_excel(ruta: Path) -> set[str]:
+    """Solo la columna `Id Contrato` de un Excel de Bronze (rápido: no lee las 180 columnas)."""
+    tabla = pd.read_excel(
+        ruta,
+        sheet_name=HOJA,
+        header=1,
+        dtype=str,
+        usecols=lambda c: _sin_tildes(str(c)) == _sin_tildes("Id Contrato"),
+    )
+    if tabla.shape[1] != 1:
+        raise FormatoDesconocido(f"{ruta.name}: no tiene la columna 'Id Contrato'")
+    return {str(v).strip().removesuffix(".0") for v in tabla.iloc[:, 0].dropna() if str(v).strip()}
+
+
+def reconstruir_fecha_ingreso(excels: list[tuple[date, Path]]) -> dict[str, str]:
+    """Mejora 8.2: la fecha de ingreso de cada contrato = el Excel MÁS ANTIGUO de Bronze en que
+    aparece. Se usa cuando el control se perdió; con un solo Excel, todos quedan con su fecha."""
+    fechas: dict[str, str] = {}
+    for dia, ruta in sorted(excels):
+        for id_contrato in ids_del_excel(ruta):
+            fechas.setdefault(id_contrato, dia.isoformat())
+    return fechas
 
 
 def escribir(

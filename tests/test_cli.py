@@ -1,5 +1,6 @@
 """Línea de comandos: códigos de salida (A15) y el flujo completo con la API simulada."""
 
+import json
 from datetime import date
 from pathlib import Path
 
@@ -88,3 +89,31 @@ def test_fecha_del_archivo() -> None:
     assert cli.fecha_del_archivo(ruta) == date(2026, 10, 15)
     with pytest.raises(ValueError):
         cli.fecha_del_archivo(Path("otro.xlsx"))
+
+
+def test_sin_control_la_fecha_de_ingreso_se_reconstruye_desde_bronze(
+    datos: Path, tmp_path: Path
+) -> None:
+    """Mejora 8.2, de punta a punta: dos Excel en Bronze y el control de Silver borrado."""
+    bronze_dir = datos / "bronze"
+    bronze_dir.mkdir()
+    for nombre, ids in (
+        ("Contratos_publica_20261001_090000.xlsx", ["1"]),
+        ("Contratos_publica_20261010_090000.xlsx", ["1", "2"]),
+    ):
+        _excel(bronze_dir / nombre, [_fila(**{"Id Contrato": i}) for i in ids])
+    manifiesto = [
+        {"archivo": n, "bytes": 1, "sha256": n, "descargado_en": "x", "edad_minutos": None}
+        for n in sorted(p.name for p in bronze_dir.glob("*.xlsx"))
+    ]
+    (bronze_dir / "manifiesto.json").write_text(
+        json.dumps({"archivos": manifiesto}), encoding="utf-8"
+    )
+
+    resultado = runner.invoke(cli.app, ["procesar"])
+
+    assert resultado.exit_code == 0, resultado.output
+    assert "se reconstruye desde 2 Excel" in resultado.output
+    tabla = pd.read_parquet(datos / "silver" / "contratos.parquet").set_index("id_contrato")
+    assert tabla.loc["1", "fecha_ingreso"] == date(2026, 10, 1)
+    assert tabla.loc["2", "fecha_ingreso"] == date(2026, 10, 10)
