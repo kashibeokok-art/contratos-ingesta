@@ -345,6 +345,18 @@ y `PPA_` en `ppa-pipeline`. Si una entrada aplica solo a un proyecto, decirlo ex
 - **Lección:** es A14 otra vez: una cifra o una atribución ("la mayor parte") sale de una medición
   a la vista. Si solo se midió el total, se escribe solo el total.
 
+### A24. Rutas de Windows escritas desde un script de Python: la barra invertida se come letras
+- **Error (2026-10-15/16, tres veces en `contratos-ingesta`):** al editar archivos con scripts de
+  Python (heredoc de Bash), escribí rutas como `data\alertas` y `\\SAFIRA` dentro de textos
+  normales de Python. `\a` se volvió el carácter "campana" (la guía 06 quedó con `datalertas`),
+  `\b` el de retroceso (en `CLAUDE.md`), y en un test las dobles barras quedaron simples.
+- **Evidencia:** `cat -A` y un recorrido de los `.md` buscando caracteres con código < 32.
+- **Corrección:** en los scripts, la barra se escribe con `chr(92)` o en un raw string, y al final
+  se recorren los archivos tocados buscando caracteres de control.
+- **Lección:** es el mismo fenómeno que deformaba la ruta del `.env` del usuario (comillas dobles).
+  Toda ruta de Windows que pase por una capa que interpreta escapes (Python, Bash, dotenv) se
+  verifica leyendo el archivo resultante, no el script que la escribió.
+
 ---
 
 ## B. Procesamiento de datos (del código que se está portando)
