@@ -18,6 +18,8 @@ from typing import TypedDict
 import pandas as pd
 import psycopg
 
+from contratos_ingesta import alertas
+
 CONTRATOS = "contratos.parquet"
 PUNTOS = "contrato_barra.parquet"
 
@@ -96,7 +98,9 @@ def _filas(tabla: pd.DataFrame, columnas: list[str]) -> list[tuple[object, ...]]
     """Filas listas para COPY: los vacíos de pandas (NaN, NaT, <NA>) pasan a None (NULL)."""
     faltan = [c for c in columnas if c not in tabla.columns]
     if faltan:
-        raise DatosInvalidos(f"a Silver le faltan columnas: {faltan}. Corre `contratos procesar`.")
+        raise DatosInvalidos(
+            alertas.mensaje("silver_invalido", f"a Silver le faltan columnas: {faltan}")
+        )
     limpia = tabla[columnas].astype(object).where(tabla[columnas].notna(), None)
     return [tuple(fila) for fila in limpia.itertuples(index=False, name=None)]
 
@@ -105,17 +109,28 @@ def validar(contratos: pd.DataFrame, puntos: pd.DataFrame) -> None:
     """Lo mínimo antes de tocar la base (A20: cada capa valida lo que recibe)."""
     if contratos.empty:
         raise DatosInvalidos(
-            "Silver no tiene contratos: no se reemplaza la base con una tabla vacía."
+            alertas.mensaje(
+                "silver_invalido",
+                "Silver no tiene contratos: no se reemplaza la base con una tabla vacía",
+            )
         )
     ids = contratos["id_contrato"]
     if ids.isna().any():
-        raise DatosInvalidos(f"{int(ids.isna().sum())} contratos sin ID")
+        raise DatosInvalidos(
+            alertas.mensaje("silver_invalido", f"{int(ids.isna().sum())} contratos sin ID")
+        )
     if ids.duplicated().any():
         repetidos = sorted(ids[ids.duplicated()].unique())[:10]
-        raise DatosInvalidos(f"IDs de contrato repetidos: {repetidos}")
+        raise DatosInvalidos(
+            alertas.mensaje("ids_repetidos", f"IDs de contrato repetidos: {repetidos}")
+        )
     huerfanos = set(puntos["id_contrato"]) - set(ids)
     if huerfanos:
-        raise DatosInvalidos(f"puntos de contratos que no existen: {sorted(huerfanos)[:10]}")
+        raise DatosInvalidos(
+            alertas.mensaje(
+                "silver_invalido", f"puntos de contratos que no existen: {sorted(huerfanos)[:10]}"
+            )
+        )
 
 
 def _origen(silver: Path) -> str:

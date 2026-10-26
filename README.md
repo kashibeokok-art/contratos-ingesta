@@ -9,14 +9,28 @@ API pública del CEN ─► Bronze: Contratos_publica_AAAAMMDD_HHMMSS.xlsx (solo
                     ─► PostgreSQL: esquema contratos (reemplazo completo en una transacción)
 ```
 
+## Para mantenerlo
+
+**[GUIA_MANTENIMIENTO.md](GUIA_MANTENIMIENTO.md)**: instalar en un equipo nuevo, la rutina
+diaria, qué hacer ante cada alerta y cómo corregir lo que cambia con el tiempo **sin tocar el
+código**:
+
+- `.env`: dónde están las carpetas y la base (uno por equipo; plantilla en `.env.example`).
+- `config/fuente.toml`: de dónde se baja el Excel.
+- `config/excel.toml`: cómo se lee el Excel (hoja, columnas, años, formas de fecha).
+- `config/reglas.toml`: reglas que se ajustan (días por vencer, puntos vacíos, sufijos).
+
 ## Uso
 
 ```powershell
 uv sync
-copy .env.example .env          # completar rutas y conexión (sin comillas)
-uv run contratos actualizar     # descargar + procesar + publicar
+Copy-Item .env.example .env       # completar (ver la guía, sección 3)
+uv run contratos diagnostico      # revisa todo y dice qué hacer
+uv run contratos actualizar       # descargar + procesar + publicar (tarea diaria)
 uv run contratos estado
 ```
+
+Más comandos: `revisar-config`, `probar-excel`, `volver-a-bajar` (guía, sección 9).
 
 Códigos de salida: 0 bien · 1 no se pudo · 2 comando mal escrito · 3 hay algo que revisar.
 
@@ -36,3 +50,6 @@ Detalle y decisiones: [`CLAUDE.md`](CLAUDE.md). Guías del código: [`docs/apren
 ```powershell
 uv run ruff check . ; uv run ruff format --check . ; uv run mypy ; uv run pytest
 ```
+
+Las pruebas no tocan la red ni las carpetas reales. `tests/test_alertas.py` y
+`tests/test_guia.py` vigilan que cada mensaje diga qué hacer y que la guía calce con el código.

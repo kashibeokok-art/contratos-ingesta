@@ -8,10 +8,11 @@ Reglas (docs/errores_verificados.md):
 """
 
 import os
+import re
 from collections.abc import Mapping
 from pathlib import Path
 
-from pydantic import SecretStr, field_validator, model_validator
+from pydantic import SecretStr, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 #: La carpeta que tiene `pyproject.toml` (este archivo está dos niveles más abajo).
@@ -41,6 +42,23 @@ def desconocidas(
     if env_file is not None:
         vistas += [k for k in claves_del_env(env_file) if k.upper().startswith(PREFIJO)]
     return sorted({k.upper() for k in vistas} - conocidas)
+
+
+def explicar(e: ValidationError) -> str:
+    """El error de configuración en palabras, una línea por problema y SIN los valores leídos.
+
+    A28: el texto de pydantic incluye `input_value` con todo lo leído del .env, clave incluida.
+    """
+    lineas = []
+    for err in e.errors(include_input=False, include_url=False, include_context=False):
+        mensaje = str(err["msg"]).removeprefix("Value error, ")
+        campo = "_".join(str(p) for p in err["loc"]).upper()
+        lineas.append(f"- {PREFIJO}{campo}: {mensaje}" if campo else f"- {mensaje}")
+    return "\n".join(lineas)
+
+
+#: `password=...` o `postgresql://usuario:clave@...`: la clave escrita dentro de la conexión.
+_CLAVE_EN_CONEXION = re.compile(r"password\s*=|://[^/@\s]*:[^/@\s]*@", re.IGNORECASE)
 
 
 class Settings(BaseSettings):
@@ -88,6 +106,17 @@ class Settings(BaseSettings):
                 "dobles las barras se interpretan y la ruta cambia."
             )
         return valor
+
+    @field_validator("pg_conexion")
+    @classmethod
+    def _conexion_sin_clave(cls, conexion: str | None) -> str | None:
+        """La clave va solo en CONT_PG_CLAVE (protegida); en la conexión quedaría a la vista."""
+        if conexion is not None and _CLAVE_EN_CONEXION.search(conexion):
+            raise ValueError(
+                "la conexión trae la clave escrita. Quita la clave de CONT_PG_CONEXION y "
+                "escríbela sola en CONT_PG_CLAVE (así nunca aparece en pantalla ni en los logs)."
+            )
+        return conexion
 
     @field_validator("data_dir")
     @classmethod

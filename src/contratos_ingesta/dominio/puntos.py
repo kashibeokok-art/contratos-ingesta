@@ -12,10 +12,15 @@ En el Excel cada contrato trae una lista separada por `;`. Formas reales (perfil
 Lo que no calza con ninguna forma se conserva con el texto completo como nombre (y se
 reporta), para no perder el dato. Unir estos nombres con las barras del CMg es otro paso
 (homologación), con revisión humana.
+
+Las 2 formas están aquí a propósito (decisión del usuario, 2026-10-26). Lo que significa
+"sin punto" (NULO) y los sufijos que se quitan ((AIS), (GIS)) están en config/reglas.toml.
 """
 
 import re
 from typing import TypedDict
+
+from contratos_ingesta import reglas
 
 _INFOTECNICA = re.compile(
     r"^BA\s+S/E\s+(?P<nombre>.+?)(?:\s+\((?P<prop>[^)]*)\))?\s+"
@@ -23,9 +28,6 @@ _INFOTECNICA = re.compile(
     re.IGNORECASE,
 )
 _SIMPLE = re.compile(r"^(?P<nombre>.+?)\s+(?P<kv>\d+)$")
-#: Sufijo con el tipo de subestación (aislada en aire / en gas). Decisión del usuario
-#: (2026-10-15): no aporta información útil, se descarta.
-_SUFIJO_AIS_GIS = re.compile(r"\s*\((?:AIS|GIS)\)$", re.IGNORECASE)
 
 
 class Punto(TypedDict):
@@ -38,11 +40,12 @@ class Punto(TypedDict):
 
 
 def separar_punto(texto: str) -> Punto | None:
-    """Un punto -> sus partes. Vacío o `NULO` -> None."""
+    """Un punto -> sus partes. Vacío o "sin punto" (`NULO`, config/reglas.toml) -> None."""
+    r = reglas.vigente()
     t = " ".join(texto.split())
-    if not t or t.upper() == "NULO":
+    if not t or t.upper() in r["vacios"]:
         return None
-    m = _INFOTECNICA.match(_SUFIJO_AIS_GIS.sub("", t))
+    m = _INFOTECNICA.match(r["re_sufijo"].sub("", t))
     if m:
         return {
             "texto": t,

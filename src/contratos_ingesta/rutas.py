@@ -6,6 +6,7 @@ datos fueran a parar a una carpeta nueva y equivocada. Por eso el programa no la
 
 from pathlib import Path
 
+from contratos_ingesta import alertas
 from contratos_ingesta.config import Settings
 
 
@@ -13,9 +14,9 @@ def exigir_carpeta(ruta: Path, variable: str) -> Path:
     """La ruta si existe; si no, ValueError con un mensaje que dice qué hacer."""
     if not ruta.is_dir():
         raise ValueError(
-            f"no se encuentra la carpeta de {variable}: {ruta}. Si está en la red, revisa que el "
-            "equipo esté conectado; si está mal escrita, corrígela en el .env. El programa no "
-            "la crea: si es nueva, créala una vez a mano."
+            alertas.mensaje(
+                "carpeta_no_encontrada", f"no se encuentra la carpeta de {variable}: {ruta}"
+            )
         )
     return ruta
 

@@ -1,0 +1,55 @@
+# =============================================================================
+#  Reglas que se ajustan con el tiempo
+# =============================================================================
+#
+# Este archivo se puede editar a mano (Bloc de notas sirve). El programa lo lee
+# cada vez que corre: no hay que tocar código. Ver GUIA_MANTENIMIENTO.md.
+#
+# Antes de editarlo, haz una copia de la carpeta config\ completa.
+# Después de editarlo:
+#     uv run contratos procesar
+#
+# Qué rehace Silver: cambiar "vacios" o "sufijos_que_se_quitan" hace que el
+# próximo "procesar" rehaga Silver, aunque ya se haya hecho hoy. Los días de
+# [avisos] y los ejemplos no rehacen nada.
+#
+# Lo que NO está aquí a propósito (decisión del 2026-10-26): las reglas de
+# negocio de la energía (máximo anual, paso a GWh, años aislados, sin dato = 0),
+# la regla de vigencia y las 2 formas de escribir un punto. Cambiarlas cambia
+# el significado de los datos: es trabajo de programador.
+
+# -----------------------------------------------------------------------------
+# Avisos
+# -----------------------------------------------------------------------------
+[avisos]
+# "contratos estado" cuenta los contratos vigentes que vencen dentro de esta
+# cantidad de días. Es una preferencia del negocio. Cambiarlo no rehace nada.
+dias_por_vencer = 180
+
+# -----------------------------------------------------------------------------
+# Puntos de retiro y suministro
+# -----------------------------------------------------------------------------
+# Cada contrato trae sus puntos separados por ";". Las dos formas de un punto
+# (por ejemplo "CHACAHUIN 13" y "BA S/E SAN JOAQUIN (CGE) 13.2KV C2") están en
+# el código.
+#
+# Cambiar "vacios" o los sufijos hace que el próximo "procesar" separe los
+# puntos de nuevo.
+[puntos]
+# Textos que significan "sin punto": no se guardan. Se comparan sin importar
+# mayúsculas. El 2026-10-15 venían 2.605 "NULO".
+vacios = ["NULO"]
+
+# Textos que se quitan del final de un punto antes de separarlo. (AIS) y (GIS)
+# dicen el tipo de subestación (aislada en aire o en gas): no aportan
+# (decisión del 2026-10-15). Se comparan sin importar mayúsculas, y también se
+# quitan los espacios de antes. El 2026-10-15 había 126 (AIS) y 5 (GIS).
+sufijos_que_se_quitan = ["(AIS)", "(GIS)"]
+
+# Puntos reales que terminan en alguno de los sufijos de arriba. Cada sufijo
+# tiene que tener al menos un ejemplo; si no, el programa se detiene y dice
+# cuál.
+ejemplos = [
+    "BA S/E LOS MAQUIS 220KV BP1-1 (AIS)",
+    "BA S/E LOS MAQUIS 220KV B1-2 (GIS)",
+]

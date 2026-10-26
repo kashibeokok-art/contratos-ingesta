@@ -52,7 +52,9 @@ def test_procesar_sin_bronze_sale_con_1(datos: Path) -> None:
     resultado = runner.invoke(cli.app, ["procesar"])
 
     assert resultado.exit_code == 1
-    assert "corre primero `contratos descargar`" in resultado.output
+    assert "Bronze está vacío" in resultado.output
+    assert "qué hacer: Correr uv run contratos actualizar" in resultado.output
+    assert "(alerta bronze_vacio en la guía)" in resultado.output
 
 
 def test_estado_sin_silver_sale_con_3(datos: Path) -> None:
@@ -185,4 +187,5 @@ def test_esquema_antiguo_dice_que_hay_que_correr_el_sql(
     resultado = runner.invoke(cli.app, ["publicar-sql"])
 
     assert resultado.exit_code == 1
-    assert "volver a correr sql/esquema_contratos.sql" in resultado.output
+    assert "debe correr sql/esquema_contratos.sql" in resultado.output
+    assert "No se cambió nada en la base" in resultado.output

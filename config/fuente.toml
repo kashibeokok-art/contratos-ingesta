@@ -1,0 +1,49 @@
+# =============================================================================
+#  De dónde se baja el Excel de contratos
+# =============================================================================
+#
+# Este archivo se puede editar a mano (Bloc de notas sirve). El programa lo lee
+# cada vez que corre: no hay que tocar código. Ver GUIA_MANTENIMIENTO.md.
+#
+# Antes de editarlo, haz una copia de la carpeta config\ completa.
+# Después de editarlo:
+#     uv run contratos descargar
+#
+# Cómo funciona la descarga (verificado el 2026-10-15): el programa le pide a
+# la dirección de abajo el Excel público de contratos. La respuesta trae un
+# enlace temporal al Excel (Contratos_publica.xlsx, unos 1,4 MB) y el programa
+# baja ese enlace. Cambiar este archivo no rehace nada de lo ya procesado.
+
+[api]
+# La dirección a la que se le pide el Excel: la descarga pública de la
+# Plataforma de Mercado del Coordinador. Viene del programa anterior y se
+# verificó el 2026-10-15. Si deja de responder, ver la receta "La descarga
+# del Coordinador cambió" de la guía.
+direccion = "https://icdp0af7ze.execute-api.us-east-1.amazonaws.com/prod/public"
+
+# Cuántas veces se intenta si la red o el servidor fallan por un momento
+# (sin conexión, o una respuesta 429, 500, 502, 503 o 504). Entre intentos se
+# espera 2, 4, 8... segundos. Un rechazo (por ejemplo 403) no se reintenta.
+# Un número entero entre 1 y 10.
+reintentos = 3
+
+# Lo que se agrega a la dirección (después del "?"). Son los filtros de la
+# descarga pública: todos vacíos = todos los contratos (así bajaron los 11.237
+# del 2026-10-15). Cada valor va entre comillas, aunque esté vacío.
+[api.parametros]
+type = "descarga_publica"
+empresa = ""
+cliente = ""
+tipoContrato = ""
+suscripcion = ""
+inicio = ""
+termino = ""
+idContrato = ""
+iniciofechaTermino = ""
+finfechaTermino = ""
+
+# Encabezados que se mandan con la petición. "origin" dice desde qué página
+# se pide (la Plataforma de Mercado), como lo haría el navegador.
+[api.encabezados]
+origin = "https://plataformamercado.coordinador.cl"
+accept = "application/json"

@@ -6,12 +6,16 @@ En el Excel (verificado el 2026-10-15) las fechas llegan de dos formas:
 
 Nunca se deja adivinar el orden a pandas: "05-03-2027" leído mes-primero sería el 3 de
 mayo, sin ningún error, y esa fecha decide si un contrato está vigente (error A21).
+
+Las formas que se aceptan están en config/excel.toml ([fechas]), cada una con un ejemplo
+real y la fecha que tiene que dar. `fechas.FORMATOS` se sigue pudiendo usar: lo resuelve
+`__getattr__`, al final del módulo.
 """
 
 from datetime import date, datetime
+from typing import Any
 
-#: Se prueban en este orden; si ninguno calza, la fecha queda vacía (no se inventa).
-FORMATOS = ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y")
+from contratos_ingesta import excel
 
 
 def leer_fecha(valor: object) -> date | None:
@@ -22,13 +26,9 @@ def leer_fecha(valor: object) -> date | None:
         return valor
     if valor is None:
         return None
-    texto = str(valor).strip()
-    for formato in FORMATOS:
-        try:
-            return datetime.strptime(texto, formato).date()
-        except ValueError:
-            continue
-    return None
+    # Se prueban en el orden del archivo; si ninguna calza, queda vacía (no se inventa).
+    leida = excel.leer_texto_fecha(str(valor).strip(), excel.vigente()["formas_fecha"])
+    return None if leida is None else leida[0]
 
 
 def termino_efectivo(termino: date | None, termino_renovacion: date | None) -> date | None:
@@ -45,3 +45,10 @@ def vigente(termino: date | None, dia: date) -> bool:
 def dias_para_vencer(termino: date | None, dia: date) -> int | None:
     """Días entre `dia` y el término (negativo si ya venció). None si no hay término."""
     return None if termino is None else (termino - dia).days
+
+
+def __getattr__(nombre: str) -> Any:
+    """`fechas.FORMATOS`: las formas de config/excel.toml (notación de strptime), al usarlo."""
+    if nombre == "FORMATOS":
+        return tuple(excel.vigente()["formas_fecha"])
+    raise AttributeError(f"module {__name__!r} has no attribute {nombre!r}")

@@ -357,6 +357,92 @@ y `PPA_` en `ppa-pipeline`. Si una entrada aplica solo a un proyecto, decirlo ex
   Toda ruta de Windows que pase por una capa que interpreta escapes (Python, Bash, dotenv) se
   verifica leyendo el archivo resultante, no el script que la escribió.
 
+### A25. Clasificar la versión de un archivo de Plabacom solo por su nombre (estudio Plabacom)
+- **Error (2026-10-16):** al comparar Plabacom con Safira, identifiqué la versión de cada ZIP por
+  el sufijo del nombre (`_BD01` = definitivo). En 2025-09, el archivo de la carpeta
+  "Reliquidación preliminar" se llama `03 Bases de Datos_2509_BD01.zip` y pisó al definitivo real
+  en mi tabla: concluí que Safira tenía "otra edición" de los 5 archivos de 2025-09.
+- **Realidad:** identificados por la ruta completa, los 5 archivos de Safira 2025-09 DEF son
+  idénticos (tamaño exacto) al definitivo de Plabacom. El "BD01" de la carpeta de reliquidación es
+  un R01P mal nombrado (publicado el 2026-07-02, fecha interna 2026-07-01).
+- **Lección:** A13 otra vez. En Plabacom ni la carpeta ni el nombre son confiables solos: la
+  identidad de un archivo es su ruta completa, y la versión se decide con carpeta + nombre +
+  fecha de publicación, registrando los choques. Una tabla indexada por una clave que puede
+  repetirse se pisa en silencio: verificar que la clave sea única antes de comparar.
+
+### A26. Concluir sobre un campo sin conocer para qué sirve (estudio Plabacom)
+- **Error (2026-10-16):** al ver que el contrato 100459 pasó de `C_AELA_INNERGEX100459` (DEF) a
+  `C_INNERGEX_AELA100459` (R01D), concluí "la clave no sirve como identificador estable", sin
+  saber que la clave existe para **cruzar quién vende y quién compra** (C_ y V_ comparten clave).
+- **Realidad (Claudio lo corrigió):** dentro de una versión, la clave cruza las dos puntas. En
+  Compraventas 2026-06 R01D, 1.025 pares tienen su C_ y su V_ con la misma clave, C_ positivo
+  y V_ negativo. Otras ~2.000 claves no calzan por igualdad simple (p. ej.
+  `C_ENEL_EGP1_1013681_PEAJE` / `V_C_ENEL_HLC1_1013681_PEAJE`): la regla completa está pendiente.
+  Lo que sí cambia entre versiones es el **texto** de algunas claves, no su función.
+- **Lección:** antes de declarar un campo inútil, averiguar (o preguntar) su función y separar
+  "cambia entre versiones" de "no sirve". Medir y luego interpretar con quien conoce el dominio.
+
+### A27. Generalizar "Safira no tiene reliquidaciones" desde una búsqueda parcial (estudio Plabacom)
+- **Error (2026-10-16):** busqué en Safira solo los ZIP de medidas dentro de `00 PRE` y `01 DEF`.
+  Como no aparecían los de reliquidación, escribí en el informe "Safira no tiene ninguna".
+- **Realidad:** Safira tiene una carpeta `AAAA/MM/02 REL` en los 12 meses de 2025 y en 2026-04
+  y 2026-05, con reliquidaciones R01P de Energía (`01 Resultados`) y SSCC; por ejemplo, 127
+  archivos en 2025-05. Lo que no tiene es la "03 Bases de Datos" de ninguna reliquidación: 0
+  archivos de medidas en `02 REL`.
+- **Lección:** una afirmación vale solo hasta donde llegó la búsqueda. Escribir "no tiene X en
+  las carpetas Y" y, antes de generalizar, listar el nivel de arriba (aquí bastaba un `ls` del mes).
+
+### A28. El mensaje de un `.env` mal escrito mostraba la clave de PostgreSQL
+- **Error (descubierto el 2026-10-26):** `cli._config()` mostraba el `ValidationError` de pydantic
+  completo (`f"Configuración inválida (.env):\n{e}"`). Cuando el error lo lanza el validador del
+  modelo (variable `CONT_*` desconocida), pydantic agrega `input_value={...}` con **todos** los
+  valores leídos, incluida `pg_clave` en texto claro: `SecretStr` protege el campo ya validado,
+  no la entrada cruda que pydantic copia en el mensaje.
+- **Evidencia:** `CONT_SILVR_DIR=x uv run contratos estado` mostró la clave en pantalla y la
+  guardó en `data\alertas\ALERTA_20261026_140703.txt` (borrada enseguida, junto con la de la
+  segunda prueba; ninguna otra alerta la contenía) y en el log del día
+  `data\logs\contratos_20261026.log` (2 líneas `input_value`, borradas; buscar `pg_clave` no las
+  encontraba porque pydantic acorta el texto: `'bro...lave': '...'`). El test D2 no lo detectaba porque prueba
+  `str(Settings())`, no el mensaje de error.
+- **Lección:** al mostrar un error de configuración, mostrar solo el `msg` de cada error
+  (`e.errors(include_input=False)`), como ya hace cmg-ingesta. Un test tiene que provocar el
+  error con una clave conocida en el entorno y verificar que no aparece ni en la salida ni en el
+  archivo de alerta. Mismo patrón en plabacom-ingesta (sin claves hoy): corregirlo igual.
+
+### A29. Un diccionario {columna del Excel: columna de Silver} pisaba una columna sin avisar
+- **Error (descubierto el 2026-10-26, paso 2 de "mantenible sin código"):** la primera versión
+  de `excel._mapa` armaba directamente `{Excel: Silver}`. Si en `config/excel.toml` se escribe la
+  misma columna del Excel para dos columnas de Silver (`cliente = "Empresa Suministradora"`), la
+  segunda pisa a la primera en el diccionario: `suministrador` desaparecía de Silver y la
+  revisión de "repetidas", hecha sobre el diccionario ya pisado, no veía nada.
+- **Evidencia:** la prueba de tipeo `cliente = "Empresa Suministradora"` de
+  `tests/test_config_excel.py` falló con `DID NOT RAISE ErrorExcel`. No llegó a usarse: se
+  descubrió antes de cerrar el paso.
+- **Lección:** validar repetidos sobre la LISTA de pares tal como se escribieron, antes de
+  convertirla en diccionario. Corregido: `_mapa` devuelve pares y `cargar` revisa los repetidos
+  antes de armar los diccionarios.
+
+### A30. Comentarios del TOML con afirmaciones no verificadas
+- **Error (descubierto el 2026-10-26, paso 2):** al escribir los comentarios de `config/` puse dos
+  datos sin comprobarlos: que la dirección de la API "es la que usa el botón Descargar" y se
+  encuentra con F12 (viene del programa anterior; nunca se miró en el navegador), y que "11.226
+  de 11.237 traen hora 00:00:00" (solo había contado la FORMA del texto, no la hora).
+- **Evidencia:** releyendo contra lo medido ese día (`CLAUDE.md` §1.1 y el perfil del Excel
+  `Contratos_publica_20261015_165541.xlsx`), ninguna de las dos estaba respaldada.
+- **Lección:** los comentarios de `config/` son la documentación del mantenedor: cada dato lleva
+  su evidencia (fecha y qué se midió) o no se escribe. Corregidos antes de cerrar el paso.
+
+### A31. Una prueba bajó el Excel real del Coordinador
+- **Error (descubierto el 2026-10-26, paso 4):** escribí una prueba que corría `contratos
+  actualizar` sin simular la API. `descargar` salió a internet y bajó el Excel real.
+- **Evidencia:** la prueba falló porque Silver tenía 11.298 contratos en vez de 1. El Excel cayó
+  en la carpeta temporal de pytest (las pruebas borran las `CONT_*` y apagan el `.env`), no en el
+  Bronze de Safira. Ninguna otra prueba salía a la red: al bloquearla, las 497 restantes pasaron.
+- **Lección:** el aislamiento no puede depender de acordarse de simular. `tests/conftest.py`
+  bloquea ahora el transporte real de httpx en todas las pruebas (fixture `sin_red`): una
+  prueba que olvida simular falla con "intentó salir a internet". La prueba que lo provocó se
+  borró (no probaba nada que otra no probara).
+
 ---
 
 ## B. Procesamiento de datos (del código que se está portando)

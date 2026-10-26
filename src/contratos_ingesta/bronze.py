@@ -22,25 +22,15 @@ import json
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TypedDict
+from typing import Any, TypedDict
 
 import httpx
 
-URL_API = "https://icdp0af7ze.execute-api.us-east-1.amazonaws.com/prod/public"
-PARAMS = {
-    "type": "descarga_publica",
-    "empresa": "",
-    "cliente": "",
-    "tipoContrato": "",
-    "suscripcion": "",
-    "inicio": "",
-    "termino": "",
-    "idContrato": "",
-    "iniciofechaTermino": "",
-    "finfechaTermino": "",
-}
-HEADERS = {"origin": "https://plataformamercado.coordinador.cl", "accept": "application/json"}
-REINTENTOS = 3
+from contratos_ingesta import alertas, fuente
+
+# La dirección, los filtros, los encabezados y los reintentos están en config/fuente.toml.
+# `bronze.URL_API`, `PARAMS`, `HEADERS` y `REINTENTOS` se siguen pudiendo usar: los resuelve
+# `__getattr__`, al final del módulo.
 MANIFIESTO = "manifiesto.json"
 
 
@@ -64,32 +54,51 @@ class Resultado(TypedDict):
 def enlace(respuesta: object) -> tuple[str, float | None]:
     """(url, antigüedad en minutos) de la respuesta de la API. Función pura."""
     if not isinstance(respuesta, dict) or not isinstance(respuesta.get("data"), dict):
-        raise ErrorDescarga(f"respuesta de la API con forma desconocida: {str(respuesta)[:200]}")
+        raise ErrorDescarga(
+            alertas.mensaje(
+                "api_respuesta_desconocida",
+                f"la API respondió con una forma desconocida: {str(respuesta)[:200]}",
+            )
+        )
     data = respuesta["data"]
     url = data.get("url")
     if not isinstance(url, str) or not url.startswith("https://"):
-        raise ErrorDescarga(f"la API no entregó un enlace de descarga: {str(data)[:200]}")
+        raise ErrorDescarga(
+            alertas.mensaje(
+                "api_respuesta_desconocida",
+                f"la API no entregó un enlace de descarga: {str(data)[:200]}",
+            )
+        )
     edad = data.get("age_minutes")
     return url, float(edad) if isinstance(edad, int | float) else None
 
 
 def pedir(cliente: httpx.Client, url: str, **kwargs: object) -> httpx.Response:
     """GET con reintentos SOLO ante errores transitorios (red, 429, 5xx). Nunca ante un 403."""
-    for intento in range(1, REINTENTOS + 1):
+    reintentos = fuente.vigente()["reintentos"]
+    for intento in range(1, reintentos + 1):
         try:
             r = cliente.get(url, **kwargs)  # type: ignore[arg-type]
         except httpx.TransportError as e:
-            if intento == REINTENTOS:
-                raise ErrorDescarga(f"sin conexión con {url.split('?')[0]}: {e}") from e
+            if intento == reintentos:
+                raise ErrorDescarga(
+                    alertas.mensaje(
+                        "api_sin_conexion", f"sin conexión con {url.split('?')[0]}: {e}"
+                    )
+                ) from e
             time.sleep(2**intento)
             continue
-        if r.status_code in (429, 500, 502, 503, 504) and intento < REINTENTOS:
+        if r.status_code in (429, 500, 502, 503, 504) and intento < reintentos:
             time.sleep(2**intento)
             continue
         if r.status_code != 200:
-            raise ErrorDescarga(f"{url.split('?')[0]} respondió HTTP {r.status_code}")
+            raise ErrorDescarga(
+                alertas.mensaje(
+                    "api_rechazo", f"{url.split('?')[0]} respondió HTTP {r.status_code}"
+                )
+            )
         return r
-    raise ErrorDescarga("sin respuesta tras varios intentos")
+    raise ErrorDescarga(alertas.mensaje("api_sin_conexion", "sin respuesta tras varios intentos"))
 
 
 def leer_manifiesto(base: Path) -> list[Entrada]:
@@ -109,16 +118,22 @@ def _guardar_manifiesto(base: Path, entradas: list[Entrada]) -> None:
 
 def descargar(base: Path, cliente: httpx.Client | None = None) -> Resultado:
     """API -> Excel en Bronze. Si es idéntico al último guardado, no se guarda otra copia."""
+    origen = fuente.vigente()  # un fuente.toml mal escrito detiene antes de conectarse
     propio = cliente is None
     cliente = cliente or httpx.Client(timeout=httpx.Timeout(120.0, connect=30.0))
     try:
-        url, edad = enlace(pedir(cliente, URL_API, params=PARAMS, headers=HEADERS).json())
+        respuesta = pedir(
+            cliente, origen["direccion"], params=origen["parametros"], headers=origen["encabezados"]
+        )
+        url, edad = enlace(respuesta.json())
         contenido = pedir(cliente, url).content
     finally:
         if propio:
             cliente.close()
     if contenido[:4] != b"PK\x03\x04":
-        raise ErrorDescarga("lo descargado no es un Excel (.xlsx)")
+        raise ErrorDescarga(
+            alertas.mensaje("descarga_no_es_excel", "lo descargado no es un Excel (.xlsx)")
+        )
 
     huella = hashlib.sha256(contenido).hexdigest()
     entradas = leer_manifiesto(base)
@@ -146,6 +161,37 @@ def descargar(base: Path, cliente: httpx.Client | None = None) -> Resultado:
     return {"ruta": destino, "nuevo": True}
 
 
+#: Donde `apartar` deja los Excel que se sacan del registro (dentro de Bronze). Nunca se borran.
+APARTADOS = "_apartados"
+
+
+def apartar(base: Path, nombre: str) -> tuple[Entrada, Path | None]:
+    """Saca un Excel del manifiesto y lo mueve a `_apartados/` (por ejemplo, uno dañado).
+
+    Así la próxima descarga lo vuelve a bajar. No borra nada: si en `_apartados/` ya hay uno con
+    ese nombre, el nuevo queda con `_2`, `_3`... Devuelve la entrada y dónde quedó el archivo
+    (None si ya no estaba en la carpeta). KeyError si el nombre no está en el manifiesto.
+    """
+    entradas = leer_manifiesto(base)
+    entrada = next((e for e in entradas if e["archivo"] == nombre), None)
+    if entrada is None:
+        raise KeyError(nombre)
+    destino: Path | None = None
+    if (base / nombre).is_file():
+        carpeta = base / APARTADOS
+        carpeta.mkdir(exist_ok=True)
+        destino = carpeta / nombre
+        n = 2
+        while destino.exists():
+            destino = carpeta / f"{Path(nombre).stem}_{n}{Path(nombre).suffix}"
+            n += 1
+        (base / nombre).replace(destino)  # se mueve dentro de la misma carpeta: no se copia
+    # primero se mueve y después se anota: si se corta entre medio, el manifiesto lista un
+    # archivo que falta, y eso `todos`/`ultimo` ya lo saltan
+    _guardar_manifiesto(base, [e for e in entradas if e["archivo"] != nombre])
+    return entrada, destino
+
+
 def todos(base: Path) -> list[Path]:
     """Todos los Excel de Bronze que existen, del más antiguo al más nuevo."""
     return [base / e["archivo"] for e in leer_manifiesto(base) if (base / e["archivo"]).is_file()]
@@ -155,3 +201,15 @@ def ultimo(base: Path) -> Path | None:
     """El último Excel guardado en Bronze (o None si no hay)."""
     existentes = [e for e in leer_manifiesto(base) if (base / e["archivo"]).is_file()]
     return base / existentes[-1]["archivo"] if existentes else None
+
+
+#: Nombre viejo -> clave de config/fuente.toml.
+_VIEJOS = {"URL_API": "direccion", "PARAMS": "parametros", "HEADERS": "encabezados",
+           "REINTENTOS": "reintentos"}  # fmt: skip
+
+
+def __getattr__(nombre: str) -> Any:
+    """`bronze.URL_API`, `PARAMS`, `HEADERS`, `REINTENTOS`: de config/fuente.toml, al usarlos."""
+    if nombre in _VIEJOS:
+        return fuente.vigente()[_VIEJOS[nombre]]  # type: ignore[literal-required]
+    raise AttributeError(f"module {__name__!r} has no attribute {nombre!r}")

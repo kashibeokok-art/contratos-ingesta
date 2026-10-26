@@ -11,6 +11,10 @@
 3. **Método (pedido del usuario, 2026-10-15):** pasos cortos y visibles. Al cerrar cada paso,
    Claude muestra qué hizo en pocas líneas y espera antes de seguir. No avanzar varios pasos
    seguidos sin que el usuario lo vea (en `ppa-pipeline` el usuario "perdió el hilo").
+4. **Mantenible sin código ni IA (ADR-C10):** lo que cambia desde afuera va a `.env` o `config/`,
+   nunca a constantes en Python. Cada mensaje de error o aviso pasa por `alertas.py` (con su
+   "qué hacer") y tiene su ficha en `GUIA_MANTENIMIENTO.md`; cada campo nuevo de `config/` va a la
+   sección 8 de la guía. `tests/test_alertas.py` y `tests/test_guia.py` lo exigen.
 
 ---
 
@@ -85,7 +89,10 @@ separadas para no repetir la energía del contrato en cada barra.
 - [x] Paso 7a: esquema SQL `sql/esquema_contratos.sql` en `cmg_cen` (probado en una copia local: permisos correctos)
 - [x] Usuario: corrió el `.sql` en `cmg_cen` del servidor y puso la clave de `contratos_carga` (2026-10-15)
 - [x] Paso 7b: `contratos publicar-sql` (reemplazo atómico; `CONT_PG_CONEXION` + `CONT_PG_CLAVE`; 6 tests de integración con `PRUEBA_PG_CONTRATOS`; real local: 11.237 + 14.328 filas en 2,7 s) — guía `07_sql.md`
-- [ ] Usuario: poner `CONT_PG_CONEXION` y `CONT_PG_CLAVE` en `.env` y correr `uv run contratos publicar-sql` contra el servidor
+- [x] Usuario: `CONT_PG_CONEXION` y `CONT_PG_CLAVE` en `.env` y `publicar-sql` contra el servidor (`diagnostico` del 2026-10-26: 2 cargas, la última el 2026-10-16, 11.237 contratos)
+- [x] Encargo "mantenible sin código ni IA" (2026-10-26, ADR-C10), pasos 1–7: rutas en `.env`; `config/` con plantillas y ejemplos; reproceso por huella; comandos de mantenimiento; alertas con "qué hacer"; `GUIA_MANTENIMIENTO.md`; cierre. 822 tests
+- [ ] Usuario: cambiar la clave de `contratos_carga` (quedó a la vista en la sesión del 2026-10-26, error A28) y ponerla en `CONT_PG_CLAVE`
+- [ ] Usuario: el primer `actualizar` real escribe Silver en Safira y anota su huella (todavía "sin huella")
 - [ ] Más adelante: API de descarga (ADR-C04)
 
 ## 3. Decisiones (ADR)
@@ -116,6 +123,26 @@ separadas para no repetir la energía del contrato en cada barra.
   programada de Windows (decisión del usuario).
 - **ADR-C09 · 2026-10-16 · Riesgo aceptado (8.6):** la clave de PostgreSQL queda en el `.env`
   (fuera de git, legible para quien acceda a la carpeta). Decisión del usuario.
+- **ADR-C10 · 2026-10-26 · Mantenible sin código ni IA** (encargo del usuario; referencia de
+  diseño: `cmg-ingesta`). El mantenedor usa PowerShell y edita texto, no lee Python, no usa Git.
+  - Editable: `.env` (rutas, conexión, clave) y `config/fuente.toml`, `excel.toml`, `reglas.toml`,
+    cada uno con su módulo que lo valida (`fuente.py`, `excel.py`, `reglas.py`). Plantillas
+    (`Energía {año}`, `DD-MM-AAAA`) con ejemplos reales obligatorios. Los nombres viejos de las
+    constantes siguen con `__getattr__` del módulo. Copia congelada en `tests/referencia_config.py`.
+  - **Fijo en código a propósito** (decisión del usuario): RN-05 a RN-09, la regla de vigencia,
+    las 2 formas de escribir un punto, y las columnas de Silver (de ellas dependen la base y el SQL).
+  - Reproceso: `_control.json` guarda la huella (sha del Excel + la de la lectura de `config/`, solo
+    si difiere de `silver.LECTURA_ORIGINAL`) y el día; `procesar` no rehace si coinciden.
+  - Comandos: `revisar-config`, `probar-excel`, `diagnostico [--sin-red]`, `volver-a-bajar`;
+    `config/` se valida al arrancar; `actualizar` sigue aunque un paso falle (peor código).
+  - Alertas: catálogo `alertas.CATALOGO` (34 tipos) y fichas en la guía.
+  - Rutas reales: opción A Safira (`18. Contratos CEN\bronze` y `\silver`, PG 192.168.0.85:5433
+    `cmg_cen`, `contratos_carga`); opción B carpeta elegida con bronze y silver separados.
+- **ADR-C11 · 2026-10-26 · Solo las formas de fecha vistas en el Excel real** (`AAAA-MM-DD hh:mm:ss`
+  y `DD-MM-AAAA`); las 2 que el código aceptaba por precaución (`AAAA-MM-DD`, `DD/MM/AAAA`) se
+  quitaron: una forma supuesta podría leer mal una fecha sin avisar (A21). Si llega otra, queda
+  vacía con el aviso `fecha_formato_desconocido` y se agrega en `config/excel.toml`. Decisión del
+  usuario.
 
 ## 4. Bitácora
 
@@ -143,3 +170,23 @@ separadas para no repetir la energía del contrato en cada barra.
 - Mejora 8.7: `deriva.py` compara cada Excel con la forma conocida (30 columnas, años 1986–2060, fechas, números con coma); `procesar` termina con 3 si hay avisos. El Excel de prueba de los tests ahora tiene las 30 columnas reales. Excel real: sin hallazgos.
 - Mejora 8.3: `contrato_historial` + tabla de paso `contrato_nuevo`; con datos reales, recargar lo mismo anota 0 cambios. El usuario debe volver a correr `sql/esquema_contratos.sql` en el servidor (agrega 2 tablas). Decisiones 8.5 (log + alerta, sin tarea programada) y 8.6 (clave en .env, riesgo aceptado): ADR-C08, C09.
 - Mejora 8.5: `bitacora.py` (log diario + alerta con código 1/3) y `cli.main` captura el código final. Sin tarea programada (ADR-C08).
+
+### 2026-10-26 — Sesión 3: mantenible sin código ni IA (ADR-C10)
+- Paso 1 (`.env`): `.env.example` reescrito para el mantenedor; la conexión con la clave adentro
+  se detiene. **A28:** el error de un `.env` mal escrito mostraba la clave de `contratos_carga`
+  (pydantic `input_value`); corregido con `config.explicar` y tests con una clave conocida. La
+  clave quedó a la vista en la sesión: el usuario debe cambiarla.
+- Paso 2 (`config/`): tres TOML con plantillas y ejemplos reales. Equivalencia exacta con el
+  código anterior sobre el Excel real del 2026-10-15 (11.237 contratos y 14.328 puntos idénticos
+  al Silver de Safira). Diferencia a propósito: `{año}` es de 4 dígitos. A29 (un diccionario
+  pisaba columnas repetidas) y A30 (comentarios sin evidencia), corregidos antes de cerrar.
+- Paso 3 (huella): Silver se rehace solo si cambia el Excel, la lectura de `config/` o el día.
+- Paso 4 (comandos de mantenimiento). Real: `diagnostico` todo OK salvo "hace días que no se
+  calcula" (la vigencia de Silver es del 2026-10-16: no hay tarea diaria, ADR-C08). **A31:** una
+  prueba bajó el Excel real (a la carpeta temporal de pytest); ahora `conftest.sin_red` bloquea la
+  red en todas las pruebas.
+- Paso 5 (alertas): `alertas.py` y `tests/test_alertas.py` por AST; sobre la copia congelada de
+  los mensajes de antes (`tests/mensajes_viejos/`) encuentra 43 sin "qué hacer".
+- Paso 6 (guía): `GUIA_MANTENIMIENTO.md`, 13 secciones, 34 fichas; `tests/test_guia.py`.
+- Paso 7: README apunta a la guía. Visto y no corregido (fuera del encargo): dos Excel distintos
+  bajados en el mismo segundo tendrían el mismo nombre en Bronze (guía, problemas conocidos).

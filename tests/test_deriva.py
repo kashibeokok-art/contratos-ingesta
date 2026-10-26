@@ -27,16 +27,17 @@ def test_columna_nueva_y_columna_que_falta() -> None:
 
     detalles = [h["detalle"] for h in deriva.revisar(tabla)]
 
-    assert "columnas nuevas: ['Tipo de Precio']" in detalles
-    assert "columnas que ya no vienen: ['Afecto Ley']" in detalles
+    assert "el Excel trae columnas nuevas: ['Tipo de Precio']" in detalles
+    assert "columnas que el Excel ya no trae: ['Afecto Ley']" in detalles
 
 
 def test_anio_nuevo_es_solo_informativo() -> None:
     hallazgos = deriva.revisar(_tabla(**{"Energía 2061": ["5"]}))
 
-    assert hallazgos == [
-        {"severidad": "info", "detalle": "años nuevos en energía/potencia: [2061]"}
+    assert [(h["tipo"], h["severidad"], h["detalle"]) for h in hallazgos] == [
+        ("anios_nuevos", "info", "años nuevos en energía/potencia: [2061]")
     ]
+    assert "[columnas.por_anio]" in hallazgos[0]["que_hacer"]
 
 
 @pytest.mark.parametrize(

@@ -13,8 +13,10 @@ from contratos_ingesta.dominio import fechas
         ("2026-09-24 00:00:00", date(2026, 9, 24)),  # forma de Inicio/Término en el Excel
         ("05-03-2027", date(2027, 3, 5)),  # renovación en texto: 5 de MARZO, no 3 de mayo
         ("30-09-2026", date(2026, 9, 30)),
-        ("2027-12-31", date(2027, 12, 31)),
-        ("31/12/2027", date(2027, 12, 31)),
+        # Formas nunca vistas en el Excel real: no se adivinan, quedan vacías y deriva avisa
+        # (decisión del usuario, 2026-10-26; antes se aceptaban por precaución)
+        ("2027-12-31", None),
+        ("31/12/2027", None),
         (datetime(2026, 1, 2, 10, 0), date(2026, 1, 2)),
         ("31-02-2027", None),  # no existe
         ("", None),

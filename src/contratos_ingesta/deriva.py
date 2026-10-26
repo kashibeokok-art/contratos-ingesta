@@ -4,37 +4,31 @@ El programa solo se detiene si falta una columna que USA. Esta revisión avisa a
 cambió sin romper nada todavía, para enterarse antes de que rompa algo o, peor, de que
 produzca un dato equivocado sin error (como una coma de miles leída como decimal, §7.8).
 
-Lo conocido son las 30 columnas fijas del Excel real (2026-10-15) + `Energía AAAA` y
-`Potencia AAAA` de 1986 a 2060. Si el CEN cambia la forma a propósito, se actualiza esta lista.
+Lo conocido (las columnas fijas, las plantillas de cada año y su rango, las formas de
+fecha) está en config/excel.toml. Si el CEN cambia la forma a propósito, se corrige ahí.
 """
 
-import re
-from typing import TypedDict
+from typing import Any
 
 import pandas as pd
 
+from contratos_ingesta import alertas, excel
 from contratos_ingesta.dominio import energia, fechas
 
-#: Las columnas fijas del Excel (encabezado de la 2.a fila), verificadas el 2026-10-15.
-COLUMNAS_CONOCIDAS = (
-    "Id Contrato", "Empresa Suministradora", "Rut Suministradora", "Tipo Suministrador",
-    "Tipo Contrato", "Red Distribuidora", "Tipo Cliente", "Empresa Cliente", "Rut Empresa Cliente",
-    "Suscripción", "Inicio", "Término", "Fecha Renovación", "Fecha Inicio Renovación",
-    "Fecha Término Renovación", "Estado Contrato", "Afecto Ley", "Régimen Compra Potencia",
-    "Correo Cliente", "Región", "Dirección Comercial", "Sector Económico", "Subsector Económico",
-    "Listado de puntos de Suministro", "Listado de puntos de Retiro",
-    "Listado de Potencia Conectada [MW]", "Listado Dirección de Referencia", "Numero Cliente",
-    "Distribuidora Conectada", "Listado Región",
-)  # fmt: skip
-ANIO_MIN, ANIO_MAX = 1986, 2060
-COLUMNAS_FECHA = ("Suscripción", "Inicio", "Término", "Fecha Término Renovación")
-
-_POR_ANIO = re.compile(r"^(Energía|Potencia) (\d{4})$")
+# `deriva.COLUMNAS_CONOCIDAS`, `ANIO_MIN`, `ANIO_MAX` y `COLUMNAS_FECHA` se siguen pudiendo
+# usar: los resuelve `__getattr__`, al final del módulo.
 
 
-class Hallazgo(TypedDict):
-    severidad: str  # aviso = mirarlo (termina con código 3) | info = solo informativo
-    detalle: str
+def _anio(columna: str, forma: excel.FormatoExcel) -> int | None:
+    """El año de una columna `Energía AAAA` / `Potencia AAAA` (nombre exacto), o None."""
+    for patron in forma["por_anio"].values():
+        if m := patron.match(columna):
+            return int(m.group(1))
+    return None
+
+
+#: Un hallazgo: tipo, severidad (aviso = código 3; info = no), detalle y qué hacer.
+Hallazgo = alertas.Hallazgo
 
 
 def _ejemplos(valores: list[str], n: int = 3) -> str:
@@ -43,42 +37,51 @@ def _ejemplos(valores: list[str], n: int = 3) -> str:
 
 def revisar(tabla: pd.DataFrame) -> list[Hallazgo]:
     """Compara la forma del Excel con la conocida. Vacío = nada distinto."""
+    forma = excel.vigente()
+    conocidas = forma["conocidas"]
     hallazgos: list[Hallazgo] = []
     columnas = [str(c) for c in tabla.columns]
-    fijas = [c for c in columnas if not _POR_ANIO.match(c)]
+    fijas = [c for c in columnas if _anio(c, forma) is None]
 
-    nuevas = [c for c in fijas if c not in COLUMNAS_CONOCIDAS]
+    nuevas = [c for c in fijas if c not in conocidas]
     if nuevas:
-        hallazgos.append({"severidad": "aviso", "detalle": f"columnas nuevas: {nuevas}"})
-    faltan = [c for c in COLUMNAS_CONOCIDAS if c not in fijas]
-    if faltan:
-        hallazgos.append({"severidad": "aviso", "detalle": f"columnas que ya no vienen: {faltan}"})
-
-    anios = sorted({int(m.group(2)) for c in columnas if (m := _POR_ANIO.match(c))})
-    fuera = [a for a in anios if not ANIO_MIN <= a <= ANIO_MAX]
-    if fuera:
         hallazgos.append(
-            {"severidad": "info", "detalle": f"años nuevos en energía/potencia: {fuera}"}
+            alertas.hallazgo("columnas_nuevas", "aviso", f"el Excel trae columnas nuevas: {nuevas}")
+        )
+    faltan = [c for c in conocidas if c not in fijas]
+    if faltan:
+        hallazgos.append(
+            alertas.hallazgo(
+                "columnas_que_faltan", "aviso", f"columnas que el Excel ya no trae: {faltan}"
+            )
         )
 
-    for columna in COLUMNAS_FECHA:
+    anios = sorted({a for c in columnas if (a := _anio(c, forma)) is not None})
+    fuera = [a for a in anios if not forma["anio_min"] <= a <= forma["anio_max"]]
+    if fuera:
+        hallazgos.append(
+            alertas.hallazgo("anios_nuevos", "info", f"años nuevos en energía/potencia: {fuera}")
+        )
+
+    for columna in forma["fecha"]:
         if columna not in tabla.columns:
             continue
         valores = [str(v).strip() for v in tabla[columna].dropna() if str(v).strip()]
         ilegibles = [v for v in valores if fechas.leer_fecha(v) is None]
         if ilegibles:
             hallazgos.append(
-                {
-                    "severidad": "aviso",
-                    "detalle": f"{columna}: {len(ilegibles)} fecha(s) con un formato desconocido "
+                alertas.hallazgo(
+                    "fecha_formato_desconocido",
+                    "aviso",
+                    f"{columna}: {len(ilegibles)} fecha(s) con un formato desconocido "
                     f"(quedan vacías), p. ej. {_ejemplos(ilegibles)}",
-                }
+                )
             )
 
     con_coma: list[str] = []
     ilegibles_num: list[str] = []
     for columna in columnas:
-        if not _POR_ANIO.match(columna):
+        if _anio(columna, forma) is None:
             continue
         for v in tabla[columna].dropna():
             texto = str(v).strip()
@@ -90,19 +93,34 @@ def revisar(tabla: pd.DataFrame) -> list[Hallazgo]:
                 ilegibles_num.append(f"{columna}={texto}")
     if con_coma:
         hallazgos.append(
-            {
-                "severidad": "aviso",
-                "detalle": f"{len(con_coma)} valor(es) de energía/potencia con coma: se leen como "
+            alertas.hallazgo(
+                "energia_con_coma",
+                "aviso",
+                f"{len(con_coma)} valor(es) de energía/potencia con coma: se leen como "
                 f"decimal; si fueran miles, el dato quedaría 1.000 veces menor. "
                 f"P. ej. {_ejemplos(con_coma)}",
-            }
+            )
         )
     if ilegibles_num:
         hallazgos.append(
-            {
-                "severidad": "aviso",
-                "detalle": f"{len(ilegibles_num)} valor(es) de energía/potencia que no son "
+            alertas.hallazgo(
+                "energia_no_numerica",
+                "aviso",
+                f"{len(ilegibles_num)} valor(es) de energía/potencia que no son "
                 f"números (quedan vacíos), p. ej. {_ejemplos(ilegibles_num)}",
-            }
+            )
         )
     return hallazgos
+
+
+def __getattr__(nombre: str) -> Any:
+    """Los nombres de antes, leídos de config/excel.toml al usarlos."""
+    if nombre == "COLUMNAS_CONOCIDAS":
+        return tuple(excel.vigente()["conocidas"])
+    if nombre == "COLUMNAS_FECHA":
+        return tuple(excel.vigente()["fecha"])
+    if nombre == "ANIO_MIN":
+        return excel.vigente()["anio_min"]
+    if nombre == "ANIO_MAX":
+        return excel.vigente()["anio_max"]
+    raise AttributeError(f"module {__name__!r} has no attribute {nombre!r}")

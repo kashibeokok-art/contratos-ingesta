@@ -1,0 +1,169 @@
+# =============================================================================
+#  Cómo se lee el Excel de contratos
+# =============================================================================
+#
+# Este archivo se puede editar a mano (Bloc de notas sirve). El programa lo lee
+# cada vez que corre: no hay que tocar código. Ver GUIA_MANTENIMIENTO.md.
+#
+# Antes de editarlo, haz una copia de la carpeta config\ completa.
+# Después de editarlo:
+#     uv run contratos procesar
+#
+# Todo lo que dice este archivo se verificó contra el Excel real del
+# 2026-10-15 (Contratos_publica_20261015_165541.xlsx: 11.237 contratos,
+# 180 columnas).
+#
+# Los nombres de columna se comparan sin tildes ni mayúsculas: "Region" y
+# "REGIÓN" son la misma columna. Escríbelos igual como vienen en el Excel.
+#
+# Qué rehace Silver: cambiar [hoja], las columnas de [columnas.texto],
+# [columnas.fecha] y [columnas.puntos], las plantillas de [columnas.por_anio]
+# o las formas de [fechas] hace que el próximo "procesar" rehaga Silver, aunque
+# ya se haya hecho hoy. Cambiar "conocidas", anio_min/anio_max o los ejemplos
+# solo cambia los avisos: no rehace nada.
+
+# -----------------------------------------------------------------------------
+# La hoja
+# -----------------------------------------------------------------------------
+[hoja]
+# El nombre de la pestaña del Excel que tiene los contratos.
+nombre = "contratos"
+
+# En qué fila están los nombres de las columnas. El Excel trae 2 filas de
+# encabezado: la 1 solo agrupa ("Información del Contrato"...) y la 2 tiene
+# los nombres de verdad. Los contratos empiezan en la fila siguiente.
+fila_encabezado = 2
+
+# -----------------------------------------------------------------------------
+# Las columnas
+# -----------------------------------------------------------------------------
+[columnas]
+# TODAS las columnas fijas que trae el Excel (sin las de cada año, que van más
+# abajo), en el orden en que vienen. No se usan todas: esta lista sirve para
+# avisar si el Coordinador agrega o quita una ("el Excel cambió de forma").
+# Una columna de las secciones de abajo tiene que estar también aquí.
+#
+# Si el Coordinador agrega una columna que no hace falta leer, basta con
+# sumarla aquí para que deje de avisar.
+conocidas = [
+    "Id Contrato",
+    "Empresa Suministradora",
+    "Rut Suministradora",
+    "Tipo Suministrador",
+    "Tipo Contrato",
+    "Red Distribuidora",
+    "Tipo Cliente",
+    "Empresa Cliente",
+    "Rut Empresa Cliente",
+    "Suscripción",
+    "Inicio",
+    "Término",
+    "Fecha Renovación",
+    "Fecha Inicio Renovación",
+    "Fecha Término Renovación",
+    "Estado Contrato",
+    "Afecto Ley",
+    "Régimen Compra Potencia",
+    "Correo Cliente",
+    "Región",
+    "Dirección Comercial",
+    "Sector Económico",
+    "Subsector Económico",
+    "Listado de puntos de Suministro",
+    "Listado de puntos de Retiro",
+    "Listado de Potencia Conectada [MW]",
+    "Listado Dirección de Referencia",
+    "Numero Cliente",
+    "Distribuidora Conectada",
+    "Listado Región",
+]
+
+# Las columnas que se LEEN. A la izquierda, la columna de Silver (NO se cambia:
+# de ella dependen las tablas y la base de datos). A la derecha, el nombre de
+# la columna en el Excel: si el Coordinador la renombra, se cambia el nombre
+# de la derecha (y también en "conocidas" de arriba).
+#
+# Correo Cliente y Dirección Comercial no se leen a propósito: son datos
+# personales.
+#
+# Cambiar una columna de la derecha hace que el próximo "procesar" la lea
+# desde la columna nueva.
+
+# Columnas de texto: se guardan tal cual (sin espacios al principio ni al final).
+[columnas.texto]
+id_contrato = "Id Contrato"
+suministrador = "Empresa Suministradora"
+rut_suministrador = "Rut Suministradora"
+tipo_suministrador = "Tipo Suministrador"
+tipo_contrato = "Tipo Contrato"
+red_distribuidora = "Red Distribuidora"
+tipo_cliente = "Tipo Cliente"
+cliente = "Empresa Cliente"
+rut_cliente = "Rut Empresa Cliente"
+estado_fuente = "Estado Contrato"
+region = "Región"
+sector_economico = "Sector Económico"
+subsector_economico = "Subsector Económico"
+
+# Columnas de fecha: se leen con las formas de [fechas], más abajo.
+[columnas.fecha]
+fecha_suscripcion = "Suscripción"
+fecha_inicio = "Inicio"
+fecha_termino = "Término"
+fecha_termino_renovacion = "Fecha Término Renovación"
+
+# Las listas de puntos de cada contrato, separados por ";".
+[columnas.puntos]
+retiro = "Listado de puntos de Retiro"
+suministro = "Listado de puntos de Suministro"
+
+# -----------------------------------------------------------------------------
+# Las columnas de cada año
+# -----------------------------------------------------------------------------
+# El Excel trae una columna por año para la energía (MWh) y otra para la
+# potencia (MW): "Energía 1986" ... "Energía 2060" y "Potencia 1986" ...
+# "Potencia 2060". Se escriben como plantilla: {año} es un año de 4 dígitos.
+[columnas.por_anio]
+energia = "Energía {año}"
+potencia = "Potencia {año}"
+
+# Nombres reales que tienen que calzar con alguna plantilla de arriba. Cada
+# plantilla tiene que tener al menos un ejemplo; si no, el programa se detiene
+# y dice cuál.
+ejemplos = ["Energía 2026", "Potencia 2026"]
+
+# Años que se esperan. Un año fuera de este rango no detiene nada: solo se
+# informa (el Excel creció). Cambiarlos no rehace nada.
+anio_min = 1986
+anio_max = 2060
+
+# -----------------------------------------------------------------------------
+# Las fechas
+# -----------------------------------------------------------------------------
+# Cómo vienen escritas las fechas en el Excel. Se prueban en este orden; si
+# ninguna calza, la fecha queda vacía y sale el aviso "fecha con un formato
+# desconocido" (el programa nunca adivina: leer 05-03-2027 al revés da el 3 de
+# mayo en vez del 5 de marzo, y eso cambia qué contratos están vigentes).
+#
+# Marcadores (respetando mayúsculas y minúsculas):
+#   AAAA año     MM mes      DD día
+#   hh   hora    mm minuto   ss segundo
+# Cualquier otro carácter va tal cual (-, /, espacio, :).
+#
+# Cambiar las formas hace que el próximo "procesar" lea las fechas de nuevo.
+[fechas]
+formas = [
+    # Suscripción, Inicio y Término (fechas de Excel): todas las que traen
+    # valor, 11.148, 11.227 y 11.226 el 2026-10-15
+    "AAAA-MM-DD hh:mm:ss",
+    # Fecha Término Renovación (texto): las 343 que traen valor
+    "DD-MM-AAAA",
+]
+
+# Ejemplos reales, con la fecha que TIENEN que dar (escrita AAAA-MM-DD). Cada
+# ejemplo tiene que leerse a esa fecha y cada forma tiene que leer al menos un
+# ejemplo: así un día y un mes cambiados de lugar se detectan al cargar.
+[fechas.ejemplos]
+"2026-09-24 00:00:00" = "2026-09-24"
+"30-09-2026" = "2026-09-30"
+"01-09-2026" = "2026-09-01"
