@@ -91,7 +91,9 @@ separadas para no repetir la energía del contrato en cada barra.
 - [x] Paso 7b: `contratos publicar-sql` (reemplazo atómico; `CONT_PG_CONEXION` + `CONT_PG_CLAVE`; 6 tests de integración con `PRUEBA_PG_CONTRATOS`; real local: 11.237 + 14.328 filas en 2,7 s) — guía `07_sql.md`
 - [x] Usuario: `CONT_PG_CONEXION` y `CONT_PG_CLAVE` en `.env` y `publicar-sql` contra el servidor (`diagnostico` del 2026-10-26: 2 cargas, la última el 2026-10-16, 11.237 contratos)
 - [x] Encargo "mantenible sin código ni IA" (2026-10-26, ADR-C10), pasos 1–7: rutas en `.env`; `config/` con plantillas y ejemplos; reproceso por huella; comandos de mantenimiento; alertas con "qué hacer"; `GUIA_MANTENIMIENTO.md`; cierre. 822 tests
-- [ ] Usuario: cambiar la clave de `contratos_carga` (quedó a la vista en la sesión del 2026-10-26, error A28) y ponerla en `CONT_PG_CLAVE`
+- [x] Usuario: cambiar la clave de `contratos_carga` (quedó a la vista en la sesión del 2026-10-26, error A28) y ponerla en `CONT_PG_CLAVE`
+  - [x] Cambiada en el servidor con `\password contratos_carga` (2026-10-30, la cambió el usuario)
+  - [x] Puesta en `CONT_PG_CLAVE` del `.env`; `diagnostico` del 2026-10-30: "PostgreSQL: conecta; 3 cargas, la última el 2026-10-26; 11,298 contratos en la base"
 - [ ] Usuario: el primer `actualizar` real escribe Silver en Safira y anota su huella (todavía "sin huella")
 - [ ] Más adelante: API de descarga (ADR-C04)
 
